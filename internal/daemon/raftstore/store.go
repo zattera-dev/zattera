@@ -42,6 +42,10 @@ type Config struct {
 	AdvertiseAddr string
 	// Bootstrap starts a fresh single-node cluster if no prior state exists.
 	Bootstrap bool
+	// BootstrapServers, when non-empty and Bootstrap is true, bootstraps with
+	// this full member set instead of just this node (simcluster / 3-node
+	// first boot). Every listed server must bootstrap with the same set.
+	BootstrapServers []raft.Server
 	// Inmem replaces bolt/file stores with in-memory ones (tests only).
 	Inmem bool
 	Logger *slog.Logger
@@ -123,10 +127,11 @@ func New(cfg Config, st *state.Store) (*Store, error) {
 			return nil, err
 		}
 		if !hasState {
-			f := r.BootstrapCluster(raft.Configuration{Servers: []raft.Server{{
-				ID:      rc.LocalID,
-				Address: transport.LocalAddr(),
-			}}})
+			servers := cfg.BootstrapServers
+			if len(servers) == 0 {
+				servers = []raft.Server{{ID: rc.LocalID, Address: transport.LocalAddr()}}
+			}
+			f := r.BootstrapCluster(raft.Configuration{Servers: servers})
 			if err := f.Error(); err != nil {
 				return nil, fmt.Errorf("raftstore: bootstrap: %w", err)
 			}
