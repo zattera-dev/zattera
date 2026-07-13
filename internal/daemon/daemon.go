@@ -231,6 +231,10 @@ func Run(ctx context.Context, cfg config.Config) error {
 	apiErr := make(chan error, 1)
 	go func() { apiErr <- apiSrv.Serve(ctx) }()
 
+	// Node liveness (T-21): the leader turns livestate heartbeats into durable
+	// node status. evaluate() is a no-op on followers.
+	go api.NewLivenessMonitor(st, rs, live, clk, nodeID, log).Run(ctx)
+
 	// Mesh (T-19): on a mesh-enabled control node, bring WireGuard up as the hub
 	// and keep its own peer set in sync. Single-node/dev disables the mesh.
 	if !cfg.Mesh.Disabled && rs.IsLeader() {
