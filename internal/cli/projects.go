@@ -5,9 +5,9 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	zatterav1 "github.com/zattera-dev/zattera/api/gen/zattera/v1"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 func newProjectsCmd() *cobra.Command {

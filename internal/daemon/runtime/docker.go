@@ -323,7 +323,7 @@ func (d *Docker) Stats(ctx context.Context, id string) (StatsSample, error) {
 	if err != nil {
 		return StatsSample{}, normalizeErr("stats", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var s container.StatsResponse
 	if err := json.NewDecoder(resp.Body).Decode(&s); err != nil {
 		return StatsSample{}, fmt.Errorf("runtime: decode stats: %w", err)
