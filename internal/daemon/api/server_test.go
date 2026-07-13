@@ -17,43 +17,6 @@ import (
 	"github.com/zattera-dev/zattera/internal/daemon/ca"
 )
 
-// startTestServer builds an API server on a loopback ephemeral port with a
-// fresh CA and serves it until the test ends.
-func startTestServer(t *testing.T, opts Options) *Server {
-	t.Helper()
-	authority, err := ca.LoadOrCreate(t.TempDir())
-	if err != nil {
-		t.Fatalf("ca: %v", err)
-	}
-	opts.CA = authority
-	opts.Listen = "127.0.0.1:0"
-	if opts.DNSNames == nil {
-		opts.DNSNames = []string{"localhost"}
-	}
-	if opts.IPs == nil {
-		opts.IPs = []net.IP{net.ParseIP("127.0.0.1")}
-	}
-	srv, err := New(opts)
-	if err != nil {
-		t.Fatalf("api.New: %v", err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		_ = srv.Serve(ctx)
-		close(done)
-	}()
-	t.Cleanup(func() {
-		cancel()
-		select {
-		case <-done:
-		case <-time.After(5 * time.Second):
-			t.Error("server did not shut down")
-		}
-	})
-	return srv
-}
-
 func TestServerDualProtocol(t *testing.T) {
 	authority, err := ca.LoadOrCreate(t.TempDir())
 	if err != nil {

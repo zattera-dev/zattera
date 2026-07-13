@@ -55,6 +55,8 @@ type Options struct {
 
 	// Node↔control services (mTLS node identity, no REST gateway).
 	AgentSyncService clusterv1.AgentSyncServiceServer
+	// JoinService is token-authenticated (no mTLS), no REST gateway.
+	JoinService clusterv1.JoinServiceServer
 
 	// Interceptors run in the given order (auth → rbac → audit → leader-forward
 	// per later tasks). Health checks bypass them via a method skip inside each.
@@ -219,6 +221,9 @@ func registerGRPC(s *grpc.Server, opts Options) {
 	}
 	if opts.AgentSyncService != nil {
 		clusterv1.RegisterAgentSyncServiceServer(s, opts.AgentSyncService)
+	}
+	if opts.JoinService != nil {
+		clusterv1.RegisterJoinServiceServer(s, opts.JoinService)
 	}
 }
 

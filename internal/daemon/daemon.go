@@ -10,6 +10,7 @@ package daemon
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"log/slog"
 	"net"
@@ -92,12 +93,17 @@ func Run(ctx context.Context, cfg config.Config) error {
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	// Worker enrollment (T-17): --join enrolls with a control plane, persists the
+	// signed node identity, then runs as a worker (no local raft/API).
 	if cfg.Join.Addr != "" {
-		// TODO(T-19): join flow (CSR → control plane → certs + mesh config).
-		return fmt.Errorf("daemon: --join is not implemented yet (task T-19)")
+		jr, err := runJoin(ctx, cfg, log)
+		if err != nil {
+			return err
+		}
+		return runWorker(ctx, cfg, jr, log)
 	}
 	if !cfg.HasRole(config.RoleControl) {
-		return fmt.Errorf("daemon: worker-only mode requires --join (task T-19)")
+		return fmt.Errorf("daemon: worker-only mode requires --join")
 	}
 
 	// Stable node identity.
@@ -187,6 +193,18 @@ func Run(ctx context.Context, cfg config.Config) error {
 	live := livestate.New(clk)
 	syncSrv := api.NewSyncServer(st, rs, live, clk, log, sealer)
 
+	// Join service (T-17): token-authenticated node enrollment. In dev (mesh
+	// disabled) joined nodes reach the control plane over loopback.
+	_, apiPort, _ := net.SplitHostPort(cfg.API.Listen)
+	if apiPort == "" {
+		apiPort = "8443"
+	}
+	joinSrv := api.NewJoinServer(st, rs, clk, authority, api.JoinConfig{
+		MeshEnabled:     !cfg.Mesh.Disabled,
+		ControlGRPCAddr: net.JoinHostPort(agentHostIP(cfg), apiPort),
+		RegistryAddr:    net.JoinHostPort(agentHostIP(cfg), "5000"),
+	}, log)
+
 	apiSrv, err := api.New(api.Options{
 		CA:               authority,
 		Listen:           cfg.API.Listen,
@@ -200,6 +218,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 		NodeService:      api.NewNodeServer(st, rs, clk, authority),
 		AuditService:     auditor,
 		AgentSyncService: syncSrv,
+		JoinService:      joinSrv,
 		UnaryInterceptors: []grpc.UnaryServerInterceptor{
 			forwarder.UnaryInterceptor, authn.UnaryInterceptor, rbac.UnaryInterceptor, auditor.UnaryInterceptor,
 		},
@@ -375,9 +394,82 @@ func localAgentDialer(authority *ca.CA, nodeID, apiListen string, log *slog.Logg
 	}
 }
 
-// agentHostIP is where the executor publishes container ports. Single-node/dev
-// (mesh disabled) uses loopback; the mesh IP is threaded through once the mesh
-// is up (T-19).
+// runWorker runs a joined node in worker mode: it opens the AgentSync stream to
+// the control plane using the signed node identity and reconciles assignments.
+// It runs no local raft or control API. Mesh transport (T-18..20) is wired in
+// later; until then the control address must be directly reachable.
+func runWorker(ctx context.Context, cfg config.Config, jr *joinResult, log *slog.Logger) error {
+	dial, err := workerAgentDialer(jr)
+	if err != nil {
+		return err
+	}
+
+	var rt crt.ContainerRuntime
+	if dk, err := crt.NewDocker(); err != nil {
+		log.Warn("container runtime unavailable; worker runs without an executor", "err", err)
+	} else {
+		rt = dk
+	}
+
+	hostIP := jr.MeshIP
+	if hostIP == "" {
+		hostIP = "127.0.0.1"
+	}
+	var regAuth *crt.RegistryAuth
+	if jr.RegistryUser != "" {
+		regAuth = &crt.RegistryAuth{Username: jr.RegistryUser, Password: jr.RegistryPass, ServerAddress: jr.RegistryAddr}
+	}
+
+	na := agent.New(agent.Config{
+		NodeID:       jr.NodeID,
+		Version:      version.Version,
+		Clock:        clock.Real{},
+		Logger:       log,
+		DiskPath:     cfg.DataDir,
+		Runtime:      rt,
+		HostIP:       hostIP,
+		RegistryAuth: regAuth,
+		Dial:         dial,
+	})
+	log.Info("worker started", "node", jr.NodeID, "control", jr.ControlGRPCAddr)
+	return na.Run(ctx)
+}
+
+// workerAgentDialer dials the control plane's AgentSync over mTLS with the
+// node's signed identity, trusting the cluster CA from the join response.
+func workerAgentDialer(jr *joinResult) (func(context.Context) (*agent.Conn, error), error) {
+	cert, err := tls.X509KeyPair(jr.certPEM, jr.keyPEM)
+	if err != nil {
+		return nil, fmt.Errorf("daemon: load node cert: %w", err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(jr.caPEM) {
+		return nil, fmt.Errorf("daemon: parse cluster CA")
+	}
+	host, _, err := net.SplitHostPort(jr.ControlGRPCAddr)
+	if err != nil {
+		host = jr.ControlGRPCAddr
+	}
+	creds := credentials.NewTLS(&tls.Config{
+		MinVersion:   tls.VersionTLS12,
+		Certificates: []tls.Certificate{cert},
+		RootCAs:      pool,
+		ServerName:   host,
+	})
+	return func(context.Context) (*agent.Conn, error) {
+		conn, err := grpc.NewClient(jr.ControlGRPCAddr, grpc.WithTransportCredentials(creds))
+		if err != nil {
+			return nil, err
+		}
+		return &agent.Conn{ClientConnInterface: conn, Close: conn.Close}, nil
+	}, nil
+}
+
+// agentHostIP is where the executor publishes container ports and where joined
+// nodes reach the control plane. Single-node/dev (mesh disabled) uses loopback;
+// the allocated mesh IP is threaded through once the mesh is up (T-19).
+//
+//nolint:unparam // cfg selects the mesh IP branch once the mesh lands (T-19).
 func agentHostIP(cfg config.Config) string {
 	if cfg.Mesh.Disabled {
 		return "127.0.0.1"
