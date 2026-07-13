@@ -4,40 +4,67 @@ import (
 	"context"
 	"log/slog"
 	"sort"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	clusterv1 "github.com/zattera-dev/zattera/api/gen/zattera/cluster/v1"
 	zatterav1 "github.com/zattera-dev/zattera/api/gen/zattera/v1"
 	"github.com/zattera-dev/zattera/internal/pkgutil/clock"
+	"github.com/zattera-dev/zattera/internal/pkgutil/ids"
 	"github.com/zattera-dev/zattera/internal/state"
 )
 
-// natKeepaliveSeconds keeps a NAT'd worker's hole to the hub open.
-const natKeepaliveSeconds = 25
+const (
+	// natKeepaliveSeconds keeps a NAT'd worker's hole to the hub (or a punched
+	// worker↔worker path) open.
+	natKeepaliveSeconds = 25
+	// endpointTTL expires a disco-observed reflexive endpoint (livestate).
+	endpointTTL = 5 * time.Minute
+	// endpointFoldInterval batches observed endpoints into durable state.
+	endpointFoldInterval = 30 * time.Second
+)
 
-// MeshServer implements MeshService.WatchPeers: it streams each node the full
-// WireGuard peer set it should install, rebuilding on any node change
-// (hub-and-spoke, Phase A). ReportObservedEndpoint (disco) lands in T-20.
+// MeshServer implements MeshService: WatchPeers streams each node its full
+// WireGuard peer set (hub-and-spoke Phase A + worker↔worker Phase B);
+// ReportObservedEndpoint records disco-observed reflexive endpoints (T-20).
 type MeshServer struct {
 	clusterv1.UnimplementedMeshServiceServer
 	store    *state.Store
+	raft     Applier
 	clock    clock.Clock
 	log      *slog.Logger
 	debounce time.Duration
+
+	mu        sync.Mutex
+	endpoints map[string]observedEndpoint // node id → latest disco observation
 }
 
-// NewMeshServer builds the mesh peer-distribution service.
-func NewMeshServer(store *state.Store, clk clock.Clock, log *slog.Logger) *MeshServer {
+type observedEndpoint struct {
+	addr string
+	at   time.Time
+}
+
+// NewMeshServer builds the mesh peer-distribution service. raft may be nil when
+// only the peer builder is exercised (no endpoint folding).
+func NewMeshServer(store *state.Store, raft Applier, clk clock.Clock, log *slog.Logger) *MeshServer {
 	if log == nil {
 		log = slog.Default()
 	}
 	if clk == nil {
 		clk = clock.Real{}
 	}
-	return &MeshServer{store: store, clock: clk, log: log, debounce: defaultAssignmentDebounce}
+	return &MeshServer{
+		store:     store,
+		raft:      raft,
+		clock:     clk,
+		log:       log,
+		debounce:  defaultAssignmentDebounce,
+		endpoints: map[string]observedEndpoint{},
+	}
 }
 
 // WatchPeers streams the calling node its full PeerSet, resending (debounced) on
@@ -111,7 +138,7 @@ func (s *MeshServer) buildPeerSet(selfID string) *clusterv1.PeerSet {
 		return ps
 	}
 	selfControl := hasControlRole(self.GetRoles())
-	selfNATd := len(self.GetPublicEndpoints()) == 0
+	selfHasEndpoint := len(self.GetPublicEndpoints()) > 0
 	ps.HubAndSpoke = !selfControl
 
 	for _, n := range nodes {
@@ -122,9 +149,6 @@ func (s *MeshServer) buildPeerSet(selfID string) *clusterv1.PeerSet {
 			continue // not mesh-ready yet
 		}
 		isControl := hasControlRole(n.GetRoles())
-		if !selfControl && !isControl {
-			continue // workers peer only with control nodes
-		}
 		peer := &clusterv1.Peer{
 			NodeId:             n.GetMeta().GetId(),
 			WireguardPublicKey: n.GetWireguardPublicKey(),
@@ -132,16 +156,104 @@ func (s *MeshServer) buildPeerSet(selfID string) *clusterv1.PeerSet {
 			Endpoints:          n.GetPublicEndpoints(),
 			IsControl:          isControl,
 		}
-		if selfControl {
+		switch {
+		case selfControl:
+			// Control sees every node with a /32.
 			peer.AllowedIps = []string{n.GetMeshIp() + "/32"}
-		} else {
+		case isControl:
+			// Worker → control: the hub route for the whole mesh.
 			peer.AllowedIps = []string{meshCIDR}
-			if selfNATd {
+			if !selfHasEndpoint {
 				peer.PersistentKeepaliveSeconds = natKeepaliveSeconds
 			}
+		default:
+			// Worker → worker (Phase B): a direct /32 path only when BOTH sides
+			// have a known endpoint. The control peers keep the /16, so WG's
+			// most-specific match uses this /32 and the hub catches the rest.
+			if !selfHasEndpoint || len(n.GetPublicEndpoints()) == 0 {
+				continue
+			}
+			peer.AllowedIps = []string{n.GetMeshIp() + "/32"}
+			peer.PersistentKeepaliveSeconds = natKeepaliveSeconds
 		}
 		ps.Peers = append(ps.Peers, peer)
 	}
 	sort.Slice(ps.Peers, func(i, j int) bool { return ps.Peers[i].GetNodeId() < ps.Peers[j].GetNodeId() })
 	return ps
+}
+
+// ReportObservedEndpoint records a node's own disco-observed reflexive endpoint.
+// Only self-reports are accepted (the mTLS identity must match the claimed node).
+func (s *MeshServer) ReportObservedEndpoint(ctx context.Context, req *clusterv1.ReportObservedEndpointRequest) (*clusterv1.ReportObservedEndpointResponse, error) {
+	caller, err := s.callerNodeID(ctx, req.GetNodeId())
+	if err != nil {
+		return nil, err
+	}
+	if req.GetObservedEndpoint() == "" {
+		return &clusterv1.ReportObservedEndpointResponse{Accepted: false}, nil
+	}
+	s.mu.Lock()
+	s.endpoints[caller] = observedEndpoint{addr: req.GetObservedEndpoint(), at: s.clock.Now()}
+	s.mu.Unlock()
+	return &clusterv1.ReportObservedEndpointResponse{Accepted: true}, nil
+}
+
+// RunEndpointFolder periodically folds fresh disco-observed endpoints into the
+// nodes' durable public_endpoints (leader only), so the peer builder can hand
+// out direct worker↔worker paths. Blocks until ctx is done.
+func (s *MeshServer) RunEndpointFolder(ctx context.Context) {
+	tick := s.clock.NewTicker(endpointFoldInterval)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C():
+			s.foldEndpoints(ctx)
+		}
+	}
+}
+
+func (s *MeshServer) foldEndpoints(ctx context.Context) {
+	if s.raft == nil || !s.raft.IsLeader() {
+		return
+	}
+	now := s.clock.Now()
+	s.mu.Lock()
+	fresh := make(map[string]string, len(s.endpoints))
+	for id, e := range s.endpoints {
+		if now.Sub(e.at) <= endpointTTL {
+			fresh[id] = e.addr
+		} else {
+			delete(s.endpoints, id)
+		}
+	}
+	s.mu.Unlock()
+
+	for id, addr := range fresh {
+		n, ok := s.store.Node(id)
+		if !ok || containsStr(n.GetPublicEndpoints(), addr) {
+			continue
+		}
+		n.PublicEndpoints = append(n.GetPublicEndpoints(), addr)
+		n.GetMeta().UpdatedAt = timestamppb.New(now)
+		cmd := &clusterv1.Command{
+			RequestId: ids.New(),
+			Actor:     "system:disco",
+			Time:      timestamppb.Now(),
+			Mutation:  &clusterv1.Command_PutNode{PutNode: &clusterv1.PutNode{Node: n}},
+		}
+		if err := s.raft.Apply(ctx, cmd); err != nil {
+			s.log.Warn("disco: fold endpoint failed", "node", id, "err", err)
+		}
+	}
+}
+
+func containsStr(ss []string, want string) bool {
+	for _, s := range ss {
+		if s == want {
+			return true
+		}
+	}
+	return false
 }

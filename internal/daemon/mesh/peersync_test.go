@@ -34,7 +34,7 @@ func TestPeerSyncAppliesPushedPeers(t *testing.T) {
 	})
 
 	srv := grpc.NewServer()
-	clusterv1.RegisterMeshServiceServer(srv, api.NewMeshServer(st, clock.NewFake(), discard()))
+	clusterv1.RegisterMeshServiceServer(srv, api.NewMeshServer(st, nil, clock.NewFake(), discard()))
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

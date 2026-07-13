@@ -219,7 +219,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 		AuditService:     auditor,
 		AgentSyncService: syncSrv,
 		JoinService:      joinSrv,
-		MeshService:      api.NewMeshServer(st, clk, log),
+		MeshService:      api.NewMeshServer(st, rs, clk, log),
 		UnaryInterceptors: []grpc.UnaryServerInterceptor{
 			forwarder.UnaryInterceptor, authn.UnaryInterceptor, rbac.UnaryInterceptor, auditor.UnaryInterceptor,
 		},

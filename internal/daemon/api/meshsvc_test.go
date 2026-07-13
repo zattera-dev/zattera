@@ -3,6 +3,7 @@ package api
 import (
 	"testing"
 
+	clusterv1 "github.com/zattera-dev/zattera/api/gen/zattera/cluster/v1"
 	zatterav1 "github.com/zattera-dev/zattera/api/gen/zattera/v1"
 	"github.com/zattera-dev/zattera/internal/pkgutil/clock"
 	"github.com/zattera-dev/zattera/internal/state"
@@ -18,7 +19,7 @@ func TestPeerSets(t *testing.T) {
 	st.PutNode(meshNode("w2", "10.90.1.2", "keyw2", false, "198.51.100.9:51820"))
 	st.PutNode(meshNode("nomesh", "", "", false)) // no mesh_ip/pubkey → skipped
 
-	s := NewMeshServer(st, clock.NewFake(), nil)
+	s := NewMeshServer(st, nil, clock.NewFake(), nil)
 
 	t.Run("worker sees only controls with the whole-mesh hub route", func(t *testing.T) {
 		ps := s.buildPeerSet("w1")
@@ -79,6 +80,36 @@ func TestPeerSets(t *testing.T) {
 	t.Run("unknown node yields an empty set", func(t *testing.T) {
 		if ps := s.buildPeerSet("ghost"); len(ps.GetPeers()) != 0 {
 			t.Fatalf("unknown node should have no peers, got %d", len(ps.GetPeers()))
+		}
+	})
+
+	t.Run("two workers with endpoints get a direct /32 and keep the hub route", func(t *testing.T) {
+		st2 := state.New()
+		st2.PutNode(meshNode("c1", "10.90.0.1", "keyc1", true, "203.0.113.1:51820"))
+		st2.PutNode(meshNode("wa", "10.90.1.1", "keywa", false, "198.51.100.1:51820"))
+		st2.PutNode(meshNode("wb", "10.90.1.2", "keywb", false, "198.51.100.2:51820"))
+		ps := NewMeshServer(st2, nil, clock.NewFake(), nil).buildPeerSet("wa")
+
+		var hub, direct *clusterv1.Peer
+		for _, p := range ps.GetPeers() {
+			switch p.GetNodeId() {
+			case "c1":
+				hub = p
+			case "wb":
+				direct = p
+			}
+		}
+		if hub == nil || direct == nil {
+			t.Fatalf("expected both a hub (c1) and a direct (wb) peer, got %+v", ps.GetPeers())
+		}
+		if len(hub.GetAllowedIps()) != 1 || hub.GetAllowedIps()[0] != meshCIDR {
+			t.Fatalf("hub peer must keep the /16 route, got %v", hub.GetAllowedIps())
+		}
+		if len(direct.GetAllowedIps()) != 1 || direct.GetAllowedIps()[0] != "10.90.1.2/32" {
+			t.Fatalf("direct worker peer must be /32, got %v", direct.GetAllowedIps())
+		}
+		if direct.GetPersistentKeepaliveSeconds() != natKeepaliveSeconds {
+			t.Fatalf("direct worker peer should keepalive, got %d", direct.GetPersistentKeepaliveSeconds())
 		}
 	})
 }
