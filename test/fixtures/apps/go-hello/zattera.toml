@@ -1,0 +1,15 @@
+# Fixture app config: Dockerfile build, one HTTP port, healthcheck.
+[app]
+name = "hello"
+
+[build]
+type = "dockerfile"
+
+[deploy]
+healthcheck = { path = "/healthz", timeout = "5s" }
+
+[env.production]
+replicas = { min = 1, max = 2 }
+
+[env.staging]
+replicas = { min = 1, max = 1 }

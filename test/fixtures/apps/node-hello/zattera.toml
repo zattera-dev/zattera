@@ -1,0 +1,12 @@
+# Fixture app config: nixpacks auto-detected Node app.
+[app]
+name = "node-hello"
+
+[build]
+type = "nixpacks"
+
+[deploy]
+healthcheck = { path = "/healthz", timeout = "5s" }
+
+[env.staging]
+replicas = { min = 1, max = 1 }
