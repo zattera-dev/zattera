@@ -1,0 +1,23 @@
+name: lint
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: make tools
+      - run: make proto-lint
+      - name: buf breaking (against main)
+        if: github.event_name == 'pull_request'
+        run: bin/buf breaking --against ".git#branch=origin/${{ github.base_ref }}"
+      - run: make check-generate
+      - run: bin/golangci-lint run

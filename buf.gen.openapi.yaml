@@ -1,0 +1,17 @@
+# OpenAPI generation for the public API only (internal protos excluded).
+# Invoked by `make generate` as: buf generate --template buf.gen.openapi.yaml --path api/proto/zattera/v1
+version: v2
+managed:
+  enabled: true
+  disable:
+    - file_option: go_package_prefix
+      module: buf.build/googleapis/googleapis
+  override:
+    - file_option: go_package_prefix
+      value: github.com/zattera-dev/zattera/api/gen
+plugins:
+  - local: bin/protoc-gen-openapiv2
+    out: api/openapi
+    opt:
+      - allow_merge=true
+      - merge_file_name=zattera.v1

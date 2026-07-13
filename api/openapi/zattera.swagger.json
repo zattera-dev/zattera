@@ -1,0 +1,4572 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "zattera/v1/common.proto",
+    "version": "version not set"
+  },
+  "tags": [
+    {
+      "name": "AuthService"
+    },
+    {
+      "name": "ProjectService"
+    },
+    {
+      "name": "AppService"
+    },
+    {
+      "name": "DeployService"
+    },
+    {
+      "name": "NodeService"
+    },
+    {
+      "name": "LogService"
+    },
+    {
+      "name": "MetricsService"
+    },
+    {
+      "name": "DomainService"
+    },
+    {
+      "name": "VolumeService"
+    },
+    {
+      "name": "JobService"
+    },
+    {
+      "name": "ExecService"
+    },
+    {
+      "name": "StateService"
+    },
+    {
+      "name": "AlertService"
+    },
+    {
+      "name": "AuditService"
+    },
+    {
+      "name": "BackupService"
+    }
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "paths": {
+    "/v1/alert-rules": {
+      "get": {
+        "operationId": "AlertService_ListRules",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListRulesResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "AlertService"
+        ]
+      },
+      "put": {
+        "operationId": "AlertService_PutRule",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1AlertRule"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1PutRuleRequest"
+            }
+          }
+        ],
+        "tags": [
+          "AlertService"
+        ]
+      }
+    },
+    "/v1/alert-rules/{ruleId}": {
+      "delete": {
+        "operationId": "AlertService_DeleteRule",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "ruleId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "AlertService"
+        ]
+      }
+    },
+    "/v1/audit/query": {
+      "post": {
+        "operationId": "AuditService_QueryAudit",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1QueryAuditResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1QueryAuditRequest"
+            }
+          }
+        ],
+        "tags": [
+          "AuditService"
+        ]
+      }
+    },
+    "/v1/auth/login": {
+      "post": {
+        "summary": "Login exchanges email+password for a short-lived session token.",
+        "operationId": "AuthService_Login",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1LoginResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1LoginRequest"
+            }
+          }
+        ],
+        "tags": [
+          "AuthService"
+        ]
+      }
+    },
+    "/v1/auth/tokens": {
+      "get": {
+        "operationId": "AuthService_ListTokens",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListTokensResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "AuthService"
+        ]
+      },
+      "post": {
+        "operationId": "AuthService_CreateToken",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1CreateTokenResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1CreateTokenRequest"
+            }
+          }
+        ],
+        "tags": [
+          "AuthService"
+        ]
+      }
+    },
+    "/v1/auth/tokens/{tokenId}": {
+      "delete": {
+        "operationId": "AuthService_RevokeToken",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "tokenId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "AuthService"
+        ]
+      }
+    },
+    "/v1/auth/whoami": {
+      "get": {
+        "operationId": "AuthService_WhoAmI",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1WhoAmIResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "AuthService"
+        ]
+      }
+    },
+    "/v1/backup": {
+      "get": {
+        "operationId": "BackupService_ListBackups",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListBackupsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "BackupService"
+        ]
+      }
+    },
+    "/v1/backup/config": {
+      "put": {
+        "operationId": "BackupService_SetBackupConfig",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1SetBackupConfigRequest"
+            }
+          }
+        ],
+        "tags": [
+          "BackupService"
+        ]
+      }
+    },
+    "/v1/backup/run": {
+      "post": {
+        "operationId": "BackupService_TriggerBackup",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1BackupRecord"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1TriggerBackupRequest"
+            }
+          }
+        ],
+        "tags": [
+          "BackupService"
+        ]
+      }
+    },
+    "/v1/join-tokens": {
+      "post": {
+        "operationId": "NodeService_CreateJoinToken",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1CreateJoinTokenResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1CreateJoinTokenRequest"
+            }
+          }
+        ],
+        "tags": [
+          "NodeService"
+        ]
+      }
+    },
+    "/v1/nodes": {
+      "get": {
+        "operationId": "NodeService_ListNodes",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListNodesResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "NodeService"
+        ]
+      }
+    },
+    "/v1/nodes/{nodeId}": {
+      "get": {
+        "operationId": "NodeService_GetNode",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1Node"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "nodeId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "NodeService"
+        ]
+      },
+      "delete": {
+        "operationId": "NodeService_RemoveNode",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "nodeId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "force",
+            "description": "remove even if not drained",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "tags": [
+          "NodeService"
+        ]
+      }
+    },
+    "/v1/nodes/{nodeId}/drain": {
+      "post": {
+        "operationId": "NodeService_DrainNode",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1Node"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "nodeId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/NodeServiceDrainNodeBody"
+            }
+          }
+        ],
+        "tags": [
+          "NodeService"
+        ]
+      }
+    },
+    "/v1/nodes/{nodeId}/labels": {
+      "put": {
+        "operationId": "NodeService_SetNodeLabels",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1Node"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "nodeId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/NodeServiceSetNodeLabelsBody"
+            }
+          }
+        ],
+        "tags": [
+          "NodeService"
+        ]
+      }
+    },
+    "/v1/notification-channels": {
+      "get": {
+        "operationId": "AlertService_ListChannels",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListChannelsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "AlertService"
+        ]
+      },
+      "put": {
+        "operationId": "AlertService_PutChannel",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1NotificationChannel"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1PutChannelRequest"
+            }
+          }
+        ],
+        "tags": [
+          "AlertService"
+        ]
+      }
+    },
+    "/v1/notification-channels/{channelId}": {
+      "delete": {
+        "operationId": "AlertService_DeleteChannel",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "channelId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "AlertService"
+        ]
+      }
+    },
+    "/v1/projects": {
+      "get": {
+        "operationId": "ProjectService_ListProjects",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListProjectsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "ProjectService"
+        ]
+      },
+      "post": {
+        "operationId": "ProjectService_CreateProject",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1Project"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1CreateProjectRequest"
+            }
+          }
+        ],
+        "tags": [
+          "ProjectService"
+        ]
+      }
+    },
+    "/v1/projects/{projectId}": {
+      "get": {
+        "operationId": "ProjectService_GetProject",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1Project"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "ProjectService"
+        ]
+      },
+      "delete": {
+        "operationId": "ProjectService_DeleteProject",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "ProjectService"
+        ]
+      }
+    },
+    "/v1/projects/{projectId}/apps": {
+      "get": {
+        "operationId": "AppService_ListApps",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListAppsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "AppService"
+        ]
+      },
+      "post": {
+        "operationId": "AppService_CreateApp",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1App"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/AppServiceCreateAppBody"
+            }
+          }
+        ],
+        "tags": [
+          "AppService"
+        ]
+      }
+    },
+    "/v1/projects/{projectId}/apps/{appId}": {
+      "get": {
+        "operationId": "AppService_GetApp",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetAppResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "appId",
+            "description": "id or name",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "AppService"
+        ]
+      },
+      "delete": {
+        "operationId": "AppService_DeleteApp",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "appId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "AppService"
+        ]
+      }
+    },
+    "/v1/projects/{projectId}/apps/{appId}/config": {
+      "put": {
+        "summary": "ApplyAppConfig applies a parsed zattera.toml: upserts build config and the\nservice spec of each declared environment (create-if-missing).",
+        "operationId": "AppService_ApplyAppConfig",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetAppResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "appId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/AppServiceApplyAppConfigBody"
+            }
+          }
+        ],
+        "tags": [
+          "AppService"
+        ]
+      }
+    },
+    "/v1/projects/{projectId}/deployments/{deploymentId}": {
+      "get": {
+        "operationId": "DeployService_GetDeployment",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1Deployment"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "deploymentId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "DeployService"
+        ]
+      }
+    },
+    "/v1/projects/{projectId}/domains": {
+      "get": {
+        "operationId": "DomainService_ListDomains",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListDomainsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "DomainService"
+        ]
+      },
+      "post": {
+        "operationId": "DomainService_AddDomain",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1Domain"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/DomainServiceAddDomainBody"
+            }
+          }
+        ],
+        "tags": [
+          "DomainService"
+        ]
+      }
+    },
+    "/v1/projects/{projectId}/domains/{domainId}": {
+      "delete": {
+        "operationId": "DomainService_RemoveDomain",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "domainId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "DomainService"
+        ]
+      }
+    },
+    "/v1/projects/{projectId}/domains/{domainId}/middleware": {
+      "put": {
+        "operationId": "DomainService_SetMiddleware",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1Domain"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "domainId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/DomainServiceSetMiddlewareBody"
+            }
+          }
+        ],
+        "tags": [
+          "DomainService"
+        ]
+      }
+    },
+    "/v1/projects/{projectId}/environments/{environmentId}/deployments": {
+      "get": {
+        "operationId": "DeployService_ListDeployments",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListDeploymentsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "DeployService"
+        ]
+      },
+      "post": {
+        "summary": "Deploy creates a release (from an image ref or a completed build) and a\nred/green deployment for it.",
+        "operationId": "DeployService_Deploy",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1Deployment"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/DeployServiceDeployBody"
+            }
+          }
+        ],
+        "tags": [
+          "DeployService"
+        ]
+      }
+    },
+    "/v1/projects/{projectId}/environments/{environmentId}/env": {
+      "get": {
+        "operationId": "AppService_GetEnvVars",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1GetEnvVarsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "reveal",
+            "description": "developer+ may reveal values; default returns keys only",
+            "in": "query",
+            "required": false,
+            "type": "boolean"
+          }
+        ],
+        "tags": [
+          "AppService"
+        ]
+      },
+      "put": {
+        "operationId": "AppService_SetEnvVars",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/AppServiceSetEnvVarsBody"
+            }
+          }
+        ],
+        "tags": [
+          "AppService"
+        ]
+      }
+    },
+    "/v1/projects/{projectId}/environments/{environmentId}/releases": {
+      "get": {
+        "operationId": "DeployService_ListReleases",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListReleasesResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "DeployService"
+        ]
+      }
+    },
+    "/v1/projects/{projectId}/environments/{environmentId}/replicas": {
+      "put": {
+        "operationId": "AppService_SetReplicas",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1Environment"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/AppServiceSetReplicasBody"
+            }
+          }
+        ],
+        "tags": [
+          "AppService"
+        ]
+      }
+    },
+    "/v1/projects/{projectId}/environments/{environmentId}/rollback": {
+      "post": {
+        "operationId": "DeployService_Rollback",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1Deployment"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "environmentId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/DeployServiceRollbackBody"
+            }
+          }
+        ],
+        "tags": [
+          "DeployService"
+        ]
+      }
+    },
+    "/v1/projects/{projectId}/instances": {
+      "get": {
+        "operationId": "DeployService_ListInstances",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListInstancesResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "appId",
+            "description": "optional filter",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "environmentId",
+            "description": "optional filter",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "DeployService"
+        ]
+      }
+    },
+    "/v1/projects/{projectId}/instances/{instanceId}/top": {
+      "get": {
+        "summary": "Top returns a process listing snapshot from inside the container.",
+        "operationId": "ExecService_Top",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1TopResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "instanceId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "ExecService"
+        ]
+      }
+    },
+    "/v1/projects/{projectId}/jobs": {
+      "get": {
+        "operationId": "JobService_ListJobs",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListJobsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "environmentId",
+            "description": "optional filter",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "cronName",
+            "description": "optional filter",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "JobService"
+        ]
+      },
+      "post": {
+        "operationId": "JobService_RunJob",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1Job"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/JobServiceRunJobBody"
+            }
+          }
+        ],
+        "tags": [
+          "JobService"
+        ]
+      }
+    },
+    "/v1/projects/{projectId}/jobs/{jobId}": {
+      "get": {
+        "operationId": "JobService_GetJob",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1Job"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "JobService"
+        ]
+      }
+    },
+    "/v1/projects/{projectId}/jobs/{jobId}/cancel": {
+      "post": {
+        "operationId": "JobService_CancelJob",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1Job"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/JobServiceCancelJobBody"
+            }
+          }
+        ],
+        "tags": [
+          "JobService"
+        ]
+      }
+    },
+    "/v1/projects/{projectId}/members": {
+      "get": {
+        "operationId": "ProjectService_ListMembers",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListMembersResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "ProjectService"
+        ]
+      },
+      "post": {
+        "operationId": "ProjectService_AddMember",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ProjectMember"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ProjectServiceAddMemberBody"
+            }
+          }
+        ],
+        "tags": [
+          "ProjectService"
+        ]
+      }
+    },
+    "/v1/projects/{projectId}/members/{userId}": {
+      "delete": {
+        "operationId": "ProjectService_RemoveMember",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "ProjectService"
+        ]
+      }
+    },
+    "/v1/projects/{projectId}/volumes": {
+      "get": {
+        "operationId": "VolumeService_ListVolumes",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListVolumesResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "VolumeService"
+        ]
+      },
+      "post": {
+        "operationId": "VolumeService_CreateVolume",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1Volume"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/VolumeServiceCreateVolumeBody"
+            }
+          }
+        ],
+        "tags": [
+          "VolumeService"
+        ]
+      }
+    },
+    "/v1/projects/{projectId}/volumes/{volumeId}": {
+      "delete": {
+        "operationId": "VolumeService_DeleteVolume",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "volumeId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "VolumeService"
+        ]
+      }
+    },
+    "/v1/projects/{projectId}/volumes/{volumeId}/restore": {
+      "post": {
+        "operationId": "VolumeService_RestoreSnapshot",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1Volume"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "volumeId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/VolumeServiceRestoreSnapshotBody"
+            }
+          }
+        ],
+        "tags": [
+          "VolumeService"
+        ]
+      }
+    },
+    "/v1/projects/{projectId}/volumes/{volumeId}/snapshots": {
+      "get": {
+        "operationId": "VolumeService_ListSnapshots",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListSnapshotsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "volumeId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "VolumeService"
+        ]
+      },
+      "post": {
+        "operationId": "VolumeService_SnapshotVolume",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1VolumeSnapshot"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "volumeId",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/VolumeServiceSnapshotVolumeBody"
+            }
+          }
+        ],
+        "tags": [
+          "VolumeService"
+        ]
+      }
+    },
+    "/v1/stats": {
+      "post": {
+        "operationId": "MetricsService_Stats",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1StatsResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "description": "StatsQuery reads historical series from the embedded TSDB (spec §3.10).",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1StatsQuery"
+            }
+          }
+        ],
+        "tags": [
+          "MetricsService"
+        ]
+      }
+    },
+    "/v1/users": {
+      "get": {
+        "operationId": "AuthService_ListUsers",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1ListUsersResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "tags": [
+          "AuthService"
+        ]
+      },
+      "post": {
+        "operationId": "AuthService_CreateUser",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1User"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1CreateUserRequest"
+            }
+          }
+        ],
+        "tags": [
+          "AuthService"
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "AppServiceApplyAppConfigBody": {
+      "type": "object",
+      "properties": {
+        "build": {
+          "$ref": "#/definitions/v1BuildConfig"
+        },
+        "github": {
+          "$ref": "#/definitions/v1GitHubConfig"
+        },
+        "environments": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/v1ServiceSpec"
+          },
+          "title": "environment name → spec, from zattera.toml [env.*] sections"
+        }
+      }
+    },
+    "AppServiceCreateAppBody": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "build": {
+          "$ref": "#/definitions/v1BuildConfig"
+        }
+      }
+    },
+    "AppServiceSetEnvVarsBody": {
+      "type": "object",
+      "properties": {
+        "set": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "plaintext in transit (TLS); encrypted at rest"
+        },
+        "unset": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "AppServiceSetReplicasBody": {
+      "type": "object",
+      "properties": {
+        "min": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "max": {
+          "type": "integer",
+          "format": "int64"
+        }
+      }
+    },
+    "DeployServiceDeployBody": {
+      "type": "object",
+      "properties": {
+        "imageRef": {
+          "type": "string",
+          "description": "deploy a pre-built image",
+          "title": "Exactly one of:"
+        },
+        "buildId": {
+          "type": "string",
+          "title": "deploy the image produced by a completed build"
+        }
+      }
+    },
+    "DeployServiceRollbackBody": {
+      "type": "object",
+      "properties": {
+        "toReleaseId": {
+          "type": "string",
+          "title": "\"\" = previous release"
+        }
+      }
+    },
+    "DomainServiceAddDomainBody": {
+      "type": "object",
+      "properties": {
+        "environmentId": {
+          "type": "string"
+        },
+        "hostname": {
+          "type": "string"
+        },
+        "pathPrefix": {
+          "type": "string"
+        },
+        "portName": {
+          "type": "string"
+        }
+      }
+    },
+    "DomainServiceSetMiddlewareBody": {
+      "type": "object",
+      "properties": {
+        "middleware": {
+          "$ref": "#/definitions/v1Middleware"
+        }
+      }
+    },
+    "JobServiceCancelJobBody": {
+      "type": "object"
+    },
+    "JobServiceRunJobBody": {
+      "type": "object",
+      "properties": {
+        "environmentId": {
+          "type": "string"
+        },
+        "command": {
+          "type": "string"
+        },
+        "maxRetries": {
+          "type": "integer",
+          "format": "int64"
+        }
+      }
+    },
+    "NodeServiceDrainNodeBody": {
+      "type": "object"
+    },
+    "NodeServiceSetNodeLabelsBody": {
+      "type": "object",
+      "properties": {
+        "labels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "schedulable": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ProjectServiceAddMemberBody": {
+      "type": "object",
+      "properties": {
+        "userEmail": {
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/definitions/v1Role"
+        }
+      }
+    },
+    "VolumeServiceCreateVolumeBody": {
+      "type": "object",
+      "properties": {
+        "environmentId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "nodeId": {
+          "type": "string",
+          "title": "\"\" = scheduler picks"
+        },
+        "snapshotPolicy": {
+          "$ref": "#/definitions/v1SnapshotPolicy"
+        }
+      }
+    },
+    "VolumeServiceRestoreSnapshotBody": {
+      "type": "object",
+      "properties": {
+        "snapshotId": {
+          "type": "string"
+        },
+        "targetNodeId": {
+          "type": "string",
+          "title": "\"\" = same node"
+        }
+      }
+    },
+    "VolumeServiceSnapshotVolumeBody": {
+      "type": "object"
+    },
+    "protobufAny": {
+      "type": "object",
+      "properties": {
+        "@type": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": {}
+    },
+    "rpcStatus": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/protobufAny"
+          }
+        }
+      }
+    },
+    "v1AlertRule": {
+      "type": "object",
+      "properties": {
+        "meta": {
+          "$ref": "#/definitions/v1Meta"
+        },
+        "name": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string",
+          "title": "\"\" = cluster-wide (admin only)"
+        },
+        "metric": {
+          "$ref": "#/definitions/v1MetricCondition",
+          "description": "Either a metric condition..."
+        },
+        "eventKind": {
+          "type": "string",
+          "description": "...or an event kind match (e.g. \"deploy.failed\", \"node.down\")."
+        },
+        "channelIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "disabled": {
+          "type": "boolean"
+        }
+      },
+      "description": "AlertRule fires notifications on metrics thresholds or event kinds\n(spec §3.10 / F23)."
+    },
+    "v1App": {
+      "type": "object",
+      "properties": {
+        "meta": {
+          "$ref": "#/definitions/v1Meta"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "title": "DNS-safe: [a-z0-9-]"
+        },
+        "build": {
+          "$ref": "#/definitions/v1BuildConfig"
+        },
+        "github": {
+          "$ref": "#/definitions/v1GitHubConfig"
+        }
+      },
+      "description": "App is a deployable application inside a project (spec §4). One app = one\nservice (one container image); its name is the service name in internal DNS\n(\u003capp\u003e.\u003cenv\u003e.\u003cproject\u003e.internal)."
+    },
+    "v1ApplyResponse": {
+      "type": "object",
+      "properties": {
+        "created": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "updated": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "unchanged": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "v1Assignment": {
+      "type": "object",
+      "properties": {
+        "meta": {
+          "$ref": "#/definitions/v1Meta"
+        },
+        "nodeId": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "environmentId": {
+          "type": "string"
+        },
+        "releaseId": {
+          "type": "string"
+        },
+        "deploymentId": {
+          "type": "string"
+        },
+        "desired": {
+          "$ref": "#/definitions/v1AssignmentDesired"
+        },
+        "configHash": {
+          "type": "string"
+        },
+        "meshPortBindings": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "description": "Host ports allocated on the node's mesh IP, keyed by PortSpec.name."
+        },
+        "observed": {
+          "$ref": "#/definitions/v1AssignmentObserved"
+        },
+        "jobId": {
+          "type": "string",
+          "description": "One-shot job/cron run: set when this assignment is a Job execution."
+        }
+      },
+      "description": "Assignment binds one replica of a release to a node (Nomad-style\nallocation; ADR-0004 / design §2.4). Desired fields are written by the\nscheduler; the Observed sub-message is reported by agents and committed in\nbatched applies."
+    },
+    "v1AssignmentDesired": {
+      "type": "string",
+      "enum": [
+        "ASSIGNMENT_DESIRED_UNSPECIFIED",
+        "ASSIGNMENT_DESIRED_RUN",
+        "ASSIGNMENT_DESIRED_STOP"
+      ],
+      "default": "ASSIGNMENT_DESIRED_UNSPECIFIED",
+      "description": "AssignmentDesired is what the scheduler wants the agent to do."
+    },
+    "v1AssignmentObserved": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "$ref": "#/definitions/v1InstanceState"
+        },
+        "containerId": {
+          "type": "string"
+        },
+        "restarts": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "exitCode": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "message": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "v1AuditEntry": {
+      "type": "object",
+      "properties": {
+        "meta": {
+          "$ref": "#/definitions/v1Meta"
+        },
+        "actorUserId": {
+          "type": "string"
+        },
+        "actorTokenId": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string",
+          "title": "full gRPC method name"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "resourceId": {
+          "type": "string"
+        },
+        "outcome": {
+          "type": "string",
+          "title": "\"ok\" or the gRPC error code string"
+        },
+        "requestSummary": {
+          "type": "string",
+          "title": "compact human-readable summary, never secrets"
+        },
+        "remoteAddr": {
+          "type": "string"
+        }
+      },
+      "description": "AuditEntry records every mutating API call (spec §3.13)."
+    },
+    "v1Autoscale": {
+      "type": "object",
+      "properties": {
+        "targetCpuPercent": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "targetMemoryPercent": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "targetRpsPerReplica": {
+          "type": "integer",
+          "format": "int64"
+        }
+      },
+      "description": "Autoscale targets; zero values mean \"not used\" (spec F7)."
+    },
+    "v1BackupConfig": {
+      "type": "object",
+      "properties": {
+        "s3Endpoint": {
+          "type": "string"
+        },
+        "s3Bucket": {
+          "type": "string"
+        },
+        "s3Prefix": {
+          "type": "string"
+        },
+        "s3Region": {
+          "type": "string"
+        },
+        "s3AccessKey": {
+          "$ref": "#/definitions/v1EncryptedValue"
+        },
+        "s3SecretKey": {
+          "$ref": "#/definitions/v1EncryptedValue"
+        },
+        "schedule": {
+          "type": "string",
+          "title": "cron for full state backups"
+        },
+        "verify": {
+          "type": "boolean",
+          "title": "periodic restore-test job (spec §3.11)"
+        }
+      },
+      "description": "BackupConfig is the cluster-wide S3 backup destination (spec §3.11)."
+    },
+    "v1BackupRecord": {
+      "type": "object",
+      "properties": {
+        "meta": {
+          "$ref": "#/definitions/v1Meta"
+        },
+        "kind": {
+          "type": "string",
+          "title": "\"state\" | \"full\""
+        },
+        "manifestKey": {
+          "type": "string"
+        },
+        "bytes": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "status": {
+          "type": "string",
+          "title": "\"complete\" | \"failed\""
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "description": "BackupRecord is one completed backup run."
+    },
+    "v1BasicAuth": {
+      "type": "object",
+      "properties": {
+        "username": {
+          "type": "string"
+        },
+        "passwordHash": {
+          "type": "string",
+          "title": "bcrypt/argon2id PHC string"
+        }
+      }
+    },
+    "v1Build": {
+      "type": "object",
+      "properties": {
+        "meta": {
+          "$ref": "#/definitions/v1Meta"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "environmentId": {
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/definitions/v1BuildType"
+        },
+        "status": {
+          "$ref": "#/definitions/v1BuildStatus"
+        },
+        "nodeId": {
+          "type": "string",
+          "title": "builder node"
+        },
+        "imageRef": {
+          "type": "string",
+          "title": "output, digest-pinned"
+        },
+        "tarballDigest": {
+          "type": "string"
+        },
+        "gitSha": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "finishedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "description": "Build tracks one image build (spec §3.4). Build logs live in the log store\nunder the build id."
+    },
+    "v1BuildConfig": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "$ref": "#/definitions/v1BuildType"
+        },
+        "dockerfilePath": {
+          "type": "string",
+          "title": "default \"Dockerfile\""
+        },
+        "contextDir": {
+          "type": "string",
+          "title": "default \".\""
+        },
+        "buildArgs": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "BuildConfig mirrors [build] in zattera.toml."
+    },
+    "v1BuildStatus": {
+      "type": "string",
+      "enum": [
+        "BUILD_STATUS_UNSPECIFIED",
+        "BUILD_STATUS_QUEUED",
+        "BUILD_STATUS_RUNNING",
+        "BUILD_STATUS_SUCCEEDED",
+        "BUILD_STATUS_FAILED",
+        "BUILD_STATUS_CANCELED"
+      ],
+      "default": "BUILD_STATUS_UNSPECIFIED"
+    },
+    "v1BuildType": {
+      "type": "string",
+      "enum": [
+        "BUILD_TYPE_UNSPECIFIED",
+        "BUILD_TYPE_NIXPACKS",
+        "BUILD_TYPE_DOCKERFILE",
+        "BUILD_TYPE_IMAGE"
+      ],
+      "default": "BUILD_TYPE_UNSPECIFIED",
+      "title": "- BUILD_TYPE_UNSPECIFIED: auto-detect: Dockerfile if present, else nixpacks\n - BUILD_TYPE_IMAGE: pre-built image reference, no build"
+    },
+    "v1CertStatus": {
+      "type": "string",
+      "enum": [
+        "CERT_STATUS_UNSPECIFIED",
+        "CERT_STATUS_PENDING",
+        "CERT_STATUS_ISSUED",
+        "CERT_STATUS_FAILED"
+      ],
+      "default": "CERT_STATUS_UNSPECIFIED"
+    },
+    "v1ConcurrencyPolicy": {
+      "type": "string",
+      "enum": [
+        "CONCURRENCY_POLICY_UNSPECIFIED",
+        "CONCURRENCY_POLICY_FORBID",
+        "CONCURRENCY_POLICY_REPLACE",
+        "CONCURRENCY_POLICY_ALLOW"
+      ],
+      "default": "CONCURRENCY_POLICY_UNSPECIFIED",
+      "title": "- CONCURRENCY_POLICY_UNSPECIFIED: forbid"
+    },
+    "v1CreateJoinTokenRequest": {
+      "type": "object",
+      "properties": {
+        "singleUse": {
+          "type": "boolean"
+        },
+        "ttl": {
+          "type": "string"
+        },
+        "roles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/v1NodeRole"
+          }
+        }
+      }
+    },
+    "v1CreateJoinTokenResponse": {
+      "type": "object",
+      "properties": {
+        "token": {
+          "type": "string",
+          "description": "Full join token: \"K10\u003cca-cert-sha256\u003e::\u003csecret\u003e\" — pins the cluster CA."
+        },
+        "info": {
+          "$ref": "#/definitions/v1JoinToken"
+        }
+      }
+    },
+    "v1CreateProjectRequest": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      }
+    },
+    "v1CreateTokenRequest": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "ttl": {
+          "type": "string",
+          "title": "0 = no expiry (PAT)"
+        }
+      }
+    },
+    "v1CreateTokenResponse": {
+      "type": "object",
+      "properties": {
+        "token": {
+          "type": "string",
+          "title": "plaintext, shown once"
+        },
+        "info": {
+          "$ref": "#/definitions/v1Token"
+        }
+      }
+    },
+    "v1CreateUserRequest": {
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "password": {
+          "type": "string"
+        },
+        "orgRole": {
+          "$ref": "#/definitions/v1Role"
+        }
+      }
+    },
+    "v1CronSpec": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "schedule": {
+          "type": "string",
+          "title": "5-field cron expression"
+        },
+        "command": {
+          "type": "string"
+        },
+        "concurrency": {
+          "$ref": "#/definitions/v1ConcurrencyPolicy"
+        },
+        "maxRetries": {
+          "type": "integer",
+          "format": "int64"
+        }
+      },
+      "description": "CronSpec declares a scheduled one-shot run of the app image (spec F22)."
+    },
+    "v1Deployment": {
+      "type": "object",
+      "properties": {
+        "meta": {
+          "$ref": "#/definitions/v1Meta"
+        },
+        "environmentId": {
+          "type": "string"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "releaseId": {
+          "type": "string"
+        },
+        "previousReleaseId": {
+          "type": "string"
+        },
+        "phase": {
+          "$ref": "#/definitions/v1DeploymentPhase"
+        },
+        "error": {
+          "type": "string"
+        },
+        "isRollback": {
+          "type": "boolean"
+        },
+        "buildId": {
+          "type": "string",
+          "title": "set while phase == BUILDING"
+        },
+        "promotedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "drainDeadline": {
+          "type": "string",
+          "format": "date-time",
+          "title": "promoted_at + rollback_window"
+        },
+        "createdByUserId": {
+          "type": "string"
+        }
+      },
+      "description": "Deployment tracks one rollout of a Release (spec §4, §3.7)."
+    },
+    "v1DeploymentPhase": {
+      "type": "string",
+      "enum": [
+        "DEPLOYMENT_PHASE_UNSPECIFIED",
+        "DEPLOYMENT_PHASE_PENDING",
+        "DEPLOYMENT_PHASE_BUILDING",
+        "DEPLOYMENT_PHASE_PLACING",
+        "DEPLOYMENT_PHASE_STARTING",
+        "DEPLOYMENT_PHASE_HEALTHCHECKING",
+        "DEPLOYMENT_PHASE_PROMOTING",
+        "DEPLOYMENT_PHASE_DRAINING_OLD",
+        "DEPLOYMENT_PHASE_SUCCEEDED",
+        "DEPLOYMENT_PHASE_FAILED",
+        "DEPLOYMENT_PHASE_ROLLED_BACK",
+        "DEPLOYMENT_PHASE_SUPERSEDED"
+      ],
+      "default": "DEPLOYMENT_PHASE_UNSPECIFIED",
+      "description": "DeploymentPhase is the red/green state machine (spec §3.7). Every\ntransition is a Raft apply so a new leader resumes where the old one died.\n\n - DEPLOYMENT_PHASE_BUILDING: only for source deploys\n - DEPLOYMENT_PHASE_PLACING: green assignments created\n - DEPLOYMENT_PHASE_STARTING: waiting for running\n - DEPLOYMENT_PHASE_PROMOTING: atomic traffic switch\n - DEPLOYMENT_PHASE_DRAINING_OLD: blue kept warm for rollback_window\n - DEPLOYMENT_PHASE_FAILED: traffic never moved\n - DEPLOYMENT_PHASE_SUPERSEDED: a newer deployment for the same env appeared"
+    },
+    "v1Domain": {
+      "type": "object",
+      "properties": {
+        "meta": {
+          "$ref": "#/definitions/v1Meta"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "environmentId": {
+          "type": "string"
+        },
+        "hostname": {
+          "type": "string",
+          "title": "\"api.example.com\""
+        },
+        "pathPrefix": {
+          "type": "string",
+          "title": "\"\" = all paths"
+        },
+        "middleware": {
+          "$ref": "#/definitions/v1Middleware"
+        },
+        "certStatus": {
+          "$ref": "#/definitions/v1CertStatus"
+        },
+        "clusterSubdomain": {
+          "type": "boolean",
+          "description": "True for the auto-generated \u003capp\u003e-\u003cenv\u003e.\u003ccluster-domain\u003e hostname."
+        },
+        "portName": {
+          "type": "string",
+          "title": "ServiceSpec port to route to; default first HTTP port"
+        }
+      },
+      "description": "Domain routes a public hostname (+ optional path prefix) to an environment\n(spec F5/F6). TLS is provisioned automatically via ACME HTTP-01."
+    },
+    "v1EncryptedValue": {
+      "type": "object",
+      "properties": {
+        "nonce": {
+          "type": "string",
+          "format": "byte"
+        },
+        "ciphertext": {
+          "type": "string",
+          "format": "byte"
+        },
+        "keyVersion": {
+          "type": "integer",
+          "format": "int64"
+        }
+      },
+      "description": "EncryptedValue is an AES-256-GCM sealed value (spec §3.13). The data key is\ncluster-wide; key_version supports future rotation."
+    },
+    "v1Environment": {
+      "type": "object",
+      "properties": {
+        "meta": {
+          "$ref": "#/definitions/v1Meta"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string",
+          "title": "denormalized for indexing"
+        },
+        "name": {
+          "type": "string",
+          "title": "\"production\", \"staging\", \"preview-42\""
+        },
+        "type": {
+          "$ref": "#/definitions/v1EnvironmentType"
+        },
+        "service": {
+          "$ref": "#/definitions/v1ServiceSpec"
+        },
+        "activeReleaseId": {
+          "type": "string",
+          "description": "The currently promoted release. Changed atomically by PromoteRelease —\nthis is the red/green traffic switch (spec §3.7)."
+        },
+        "routeGeneration": {
+          "type": "string",
+          "format": "uint64",
+          "description": "Monotonic generation bumped on every routing-relevant change; proxies use\nit to order RouteSnapshots."
+        },
+        "previewPrNumber": {
+          "type": "string",
+          "format": "int64",
+          "title": "Preview environments only:"
+        },
+        "previewExpiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "effectiveReplicas": {
+          "type": "integer",
+          "format": "int64",
+          "description": "Effective replica count last decided by the autoscaler (within\nservice.replicas min/max). 0 = follow replicas.min."
+        },
+        "idleTimeout": {
+          "type": "string",
+          "title": "scale-to-zero idle window"
+        }
+      },
+      "description": "Environment is a deployment target of an app (production, staging,\npreview-*). It owns the service spec, env vars, domains and releases."
+    },
+    "v1EnvironmentType": {
+      "type": "string",
+      "enum": [
+        "ENVIRONMENT_TYPE_UNSPECIFIED",
+        "ENVIRONMENT_TYPE_PRODUCTION",
+        "ENVIRONMENT_TYPE_STAGING",
+        "ENVIRONMENT_TYPE_PREVIEW"
+      ],
+      "default": "ENVIRONMENT_TYPE_UNSPECIFIED"
+    },
+    "v1ExecOutput": {
+      "type": "object",
+      "properties": {
+        "stdout": {
+          "type": "string",
+          "format": "byte"
+        },
+        "stderr": {
+          "type": "string",
+          "format": "byte"
+        },
+        "exited": {
+          "type": "boolean"
+        },
+        "exitCode": {
+          "type": "integer",
+          "format": "int32"
+        }
+      }
+    },
+    "v1ExecStart": {
+      "type": "object",
+      "properties": {
+        "projectId": {
+          "type": "string"
+        },
+        "instanceId": {
+          "type": "string",
+          "title": "assignment id"
+        },
+        "command": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "default [\"/bin/sh\"]"
+        },
+        "tty": {
+          "type": "boolean"
+        },
+        "initialSize": {
+          "$ref": "#/definitions/v1TerminalSize"
+        }
+      }
+    },
+    "v1FileChunk": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "string",
+          "format": "byte"
+        }
+      }
+    },
+    "v1FileInfo": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "dir": {
+          "type": "boolean"
+        },
+        "sizeBytes": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "modTimeUnixMs": {
+          "type": "string",
+          "format": "int64"
+        },
+        "mode": {
+          "type": "string"
+        }
+      }
+    },
+    "v1GetAppResponse": {
+      "type": "object",
+      "properties": {
+        "app": {
+          "$ref": "#/definitions/v1App"
+        },
+        "environments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Environment"
+          }
+        }
+      }
+    },
+    "v1GetEnvVarsResponse": {
+      "type": "object",
+      "properties": {
+        "vars": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "values \"\" unless reveal"
+        }
+      }
+    },
+    "v1GitHubConfig": {
+      "type": "object",
+      "properties": {
+        "repo": {
+          "type": "string",
+          "title": "\"owner/name\""
+        },
+        "installationId": {
+          "type": "string",
+          "format": "int64"
+        },
+        "webhookSecretId": {
+          "type": "string",
+          "title": "reference to an encrypted secret"
+        },
+        "branchEnvironments": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "branch → environment name, e.g. {\"main\": \"production\", \"develop\": \"staging\"}"
+        },
+        "previewEnvironments": {
+          "type": "boolean",
+          "title": "PR → preview-\u003cn\u003e ephemeral envs (M3)"
+        }
+      },
+      "description": "GitHubConfig wires push-to-deploy (spec F9)."
+    },
+    "v1HealthCheck": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "$ref": "#/definitions/v1HealthCheckType"
+        },
+        "path": {
+          "type": "string",
+          "title": "HTTP only"
+        },
+        "port": {
+          "type": "integer",
+          "format": "int64",
+          "title": "defaults to first port"
+        },
+        "command": {
+          "type": "string",
+          "title": "exec only"
+        },
+        "interval": {
+          "type": "string",
+          "title": "default 10s"
+        },
+        "timeout": {
+          "type": "string",
+          "title": "default 5s"
+        },
+        "gracePeriod": {
+          "type": "string",
+          "title": "default 60s: time to first success"
+        },
+        "unhealthyThreshold": {
+          "type": "integer",
+          "format": "int64",
+          "title": "consecutive failures, default 3"
+        }
+      }
+    },
+    "v1HealthCheckType": {
+      "type": "string",
+      "enum": [
+        "HEALTH_CHECK_TYPE_UNSPECIFIED",
+        "HEALTH_CHECK_TYPE_HTTP",
+        "HEALTH_CHECK_TYPE_TCP",
+        "HEALTH_CHECK_TYPE_EXEC"
+      ],
+      "default": "HEALTH_CHECK_TYPE_UNSPECIFIED",
+      "title": "- HEALTH_CHECK_TYPE_UNSPECIFIED: HTTP if the service has an HTTP port, else TCP"
+    },
+    "v1InstanceState": {
+      "type": "string",
+      "enum": [
+        "INSTANCE_STATE_UNSPECIFIED",
+        "INSTANCE_STATE_PENDING",
+        "INSTANCE_STATE_PULLING",
+        "INSTANCE_STATE_STARTING",
+        "INSTANCE_STATE_RUNNING",
+        "INSTANCE_STATE_HEALTHY",
+        "INSTANCE_STATE_UNHEALTHY",
+        "INSTANCE_STATE_FAILED",
+        "INSTANCE_STATE_STOPPED"
+      ],
+      "default": "INSTANCE_STATE_UNSPECIFIED",
+      "description": "InstanceState is the observed lifecycle of one container instance.\n\n - INSTANCE_STATE_RUNNING: process up, not yet passed healthcheck"
+    },
+    "v1Job": {
+      "type": "object",
+      "properties": {
+        "meta": {
+          "$ref": "#/definitions/v1Meta"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "environmentId": {
+          "type": "string"
+        },
+        "releaseId": {
+          "type": "string",
+          "title": "image source; empty = active release at creation"
+        },
+        "command": {
+          "type": "string"
+        },
+        "cronName": {
+          "type": "string",
+          "title": "\"\" for `zattera jobs run`"
+        },
+        "status": {
+          "$ref": "#/definitions/v1JobStatus"
+        },
+        "nodeId": {
+          "type": "string"
+        },
+        "exitCode": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "attempt": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "maxRetries": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "error": {
+          "type": "string"
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "finishedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "createdByUserId": {
+          "type": "string"
+        }
+      },
+      "description": "Job is a one-shot container run from an app's image (spec §3.12).\nCron-triggered runs create Jobs with cron_name set."
+    },
+    "v1JobStatus": {
+      "type": "string",
+      "enum": [
+        "JOB_STATUS_UNSPECIFIED",
+        "JOB_STATUS_QUEUED",
+        "JOB_STATUS_RUNNING",
+        "JOB_STATUS_SUCCEEDED",
+        "JOB_STATUS_FAILED",
+        "JOB_STATUS_RETRYING",
+        "JOB_STATUS_CANCELED"
+      ],
+      "default": "JOB_STATUS_UNSPECIFIED"
+    },
+    "v1JoinToken": {
+      "type": "object",
+      "properties": {
+        "meta": {
+          "$ref": "#/definitions/v1Meta"
+        },
+        "secretHash": {
+          "type": "string"
+        },
+        "singleUse": {
+          "type": "boolean"
+        },
+        "used": {
+          "type": "boolean"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "roles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/v1NodeRole"
+          },
+          "title": "roles the joining node may assume"
+        },
+        "createdByUserId": {
+          "type": "string"
+        }
+      },
+      "description": "JoinToken authorizes `zattera server --join` (spec §3.1). The secret is\nstored hashed."
+    },
+    "v1ListAppsResponse": {
+      "type": "object",
+      "properties": {
+        "apps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1App"
+          }
+        }
+      }
+    },
+    "v1ListBackupsResponse": {
+      "type": "object",
+      "properties": {
+        "backups": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1BackupRecord"
+          }
+        },
+        "config": {
+          "$ref": "#/definitions/v1BackupConfig",
+          "title": "credentials redacted"
+        }
+      }
+    },
+    "v1ListChannelsResponse": {
+      "type": "object",
+      "properties": {
+        "channels": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1NotificationChannel"
+          }
+        }
+      }
+    },
+    "v1ListDeploymentsResponse": {
+      "type": "object",
+      "properties": {
+        "deployments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Deployment"
+          }
+        }
+      }
+    },
+    "v1ListDomainsResponse": {
+      "type": "object",
+      "properties": {
+        "domains": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Domain"
+          }
+        }
+      }
+    },
+    "v1ListFilesResponse": {
+      "type": "object",
+      "properties": {
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1FileInfo"
+          }
+        }
+      }
+    },
+    "v1ListInstancesResponse": {
+      "type": "object",
+      "properties": {
+        "instances": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Assignment"
+          }
+        }
+      }
+    },
+    "v1ListJobsResponse": {
+      "type": "object",
+      "properties": {
+        "jobs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Job"
+          }
+        }
+      }
+    },
+    "v1ListMembersResponse": {
+      "type": "object",
+      "properties": {
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1ProjectMember"
+          }
+        }
+      }
+    },
+    "v1ListNodesResponse": {
+      "type": "object",
+      "properties": {
+        "nodes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Node"
+          }
+        }
+      }
+    },
+    "v1ListProjectsResponse": {
+      "type": "object",
+      "properties": {
+        "projects": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Project"
+          }
+        }
+      }
+    },
+    "v1ListReleasesResponse": {
+      "type": "object",
+      "properties": {
+        "releases": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Release"
+          }
+        }
+      }
+    },
+    "v1ListRulesResponse": {
+      "type": "object",
+      "properties": {
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1AlertRule"
+          }
+        }
+      }
+    },
+    "v1ListSnapshotsResponse": {
+      "type": "object",
+      "properties": {
+        "snapshots": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1VolumeSnapshot"
+          }
+        }
+      }
+    },
+    "v1ListTokensResponse": {
+      "type": "object",
+      "properties": {
+        "tokens": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Token"
+          }
+        }
+      }
+    },
+    "v1ListUsersResponse": {
+      "type": "object",
+      "properties": {
+        "users": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1User"
+          }
+        }
+      }
+    },
+    "v1ListVolumesResponse": {
+      "type": "object",
+      "properties": {
+        "volumes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Volume"
+          }
+        }
+      }
+    },
+    "v1LogLine": {
+      "type": "object",
+      "properties": {
+        "time": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "instanceId": {
+          "type": "string"
+        },
+        "appName": {
+          "type": "string"
+        },
+        "environmentName": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/v1LogSource"
+        },
+        "line": {
+          "type": "string"
+        }
+      }
+    },
+    "v1LogSelector": {
+      "type": "object",
+      "properties": {
+        "projectId": {
+          "type": "string"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "environmentId": {
+          "type": "string",
+          "title": "\"\" = all envs of the app"
+        },
+        "deploymentId": {
+          "type": "string",
+          "title": "build+runtime logs of one deployment"
+        },
+        "buildId": {
+          "type": "string",
+          "title": "build logs only"
+        },
+        "jobId": {
+          "type": "string",
+          "title": "job run logs"
+        },
+        "instanceId": {
+          "type": "string",
+          "title": "one specific assignment"
+        }
+      },
+      "description": "LogSelector picks which streams to read. Control fans the query out to the\nnodes running matching instances and k-way merges by timestamp (spec §3.10)."
+    },
+    "v1LogSource": {
+      "type": "string",
+      "enum": [
+        "LOG_SOURCE_UNSPECIFIED",
+        "LOG_SOURCE_STDOUT",
+        "LOG_SOURCE_STDERR",
+        "LOG_SOURCE_BUILD",
+        "LOG_SOURCE_SYSTEM"
+      ],
+      "default": "LOG_SOURCE_UNSPECIFIED",
+      "title": "- LOG_SOURCE_SYSTEM: platform events about the instance (restarts, OOM)"
+    },
+    "v1LoginRequest": {
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string"
+        },
+        "password": {
+          "type": "string"
+        }
+      }
+    },
+    "v1LoginResponse": {
+      "type": "object",
+      "properties": {
+        "token": {
+          "type": "string",
+          "title": "plaintext session token, shown once"
+        },
+        "user": {
+          "$ref": "#/definitions/v1User"
+        }
+      }
+    },
+    "v1Meta": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "description": "Meta is embedded in every first-class object. `id` is a ULID string."
+    },
+    "v1MetricCondition": {
+      "type": "object",
+      "properties": {
+        "metric": {
+          "type": "string",
+          "description": "\"cpu_percent\", \"memory_percent\", \"disk_percent\", \"error_rate\", ..."
+        },
+        "scope": {
+          "type": "string",
+          "title": "\"node:\u003cid\u003e\" | \"env:\u003cid\u003e\" | \"cluster\""
+        },
+        "op": {
+          "type": "string",
+          "title": "\"\u003e\" | \"\u003c\""
+        },
+        "threshold": {
+          "type": "number",
+          "format": "double"
+        },
+        "sustained": {
+          "type": "string",
+          "title": "must hold this long"
+        }
+      }
+    },
+    "v1Middleware": {
+      "type": "object",
+      "properties": {
+        "redirectHttps": {
+          "type": "boolean",
+          "title": "default true"
+        },
+        "compress": {
+          "type": "boolean",
+          "title": "gzip/brotli"
+        },
+        "basicAuth": {
+          "$ref": "#/definitions/v1BasicAuth"
+        },
+        "ipAllowlist": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "title": "CIDRs"
+        },
+        "maxBodyBytes": {
+          "type": "string",
+          "format": "uint64",
+          "title": "0 = unlimited"
+        },
+        "stickySessions": {
+          "type": "boolean",
+          "title": "cookie-based (M3)"
+        }
+      },
+      "description": "Middleware are built-in per-route features (spec §3.5)."
+    },
+    "v1Node": {
+      "type": "object",
+      "properties": {
+        "meta": {
+          "$ref": "#/definitions/v1Meta"
+        },
+        "name": {
+          "type": "string"
+        },
+        "roles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/v1NodeRole"
+          }
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "region, provider, arch, builder=true, ingress=true, ..."
+        },
+        "meshIp": {
+          "type": "string",
+          "title": "stable 10.90.0.0/16 address, allocated at join"
+        },
+        "wireguardPublicKey": {
+          "type": "string"
+        },
+        "publicEndpoints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Publicly reachable \"host:port\" UDP endpoints for WireGuard, if any."
+        },
+        "capacity": {
+          "$ref": "#/definitions/v1ResourceLimits"
+        },
+        "capacityDiskMb": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "status": {
+          "$ref": "#/definitions/v1NodeStatus"
+        },
+        "schedulable": {
+          "type": "boolean"
+        },
+        "autoprovisioned": {
+          "type": "boolean"
+        },
+        "binaryVersion": {
+          "type": "string"
+        },
+        "lastHeartbeatAt": {
+          "type": "string",
+          "format": "date-time",
+          "title": "durable, coarse (batched)"
+        },
+        "osArch": {
+          "type": "string",
+          "title": "\"linux/amd64\""
+        }
+      },
+      "description": "Node is a machine in the pool (spec §4)."
+    },
+    "v1NodeRole": {
+      "type": "string",
+      "enum": [
+        "NODE_ROLE_UNSPECIFIED",
+        "NODE_ROLE_CONTROL",
+        "NODE_ROLE_WORKER"
+      ],
+      "default": "NODE_ROLE_UNSPECIFIED"
+    },
+    "v1NodeStatus": {
+      "type": "string",
+      "enum": [
+        "NODE_STATUS_UNSPECIFIED",
+        "NODE_STATUS_ALIVE",
+        "NODE_STATUS_SUSPECT",
+        "NODE_STATUS_DOWN",
+        "NODE_STATUS_DRAINING",
+        "NODE_STATUS_DRAINED"
+      ],
+      "default": "NODE_STATUS_UNSPECIFIED",
+      "title": "- NODE_STATUS_SUSPECT: missed heartbeats / gossip suspicion"
+    },
+    "v1NotificationChannel": {
+      "type": "object",
+      "properties": {
+        "meta": {
+          "$ref": "#/definitions/v1Meta"
+        },
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "title": "\"webhook\" | \"slack\" | \"email\""
+        },
+        "webhookUrlPlain": {
+          "type": "string",
+          "description": "webhook: may be non-secret",
+          "title": "type-specific settings; secret values encrypted:"
+        },
+        "webhookSecret": {
+          "$ref": "#/definitions/v1EncryptedValue",
+          "title": "optional HMAC signing key"
+        },
+        "slackWebhookUrl": {
+          "$ref": "#/definitions/v1EncryptedValue"
+        },
+        "emailTo": {
+          "type": "string"
+        },
+        "smtp": {
+          "$ref": "#/definitions/v1SMTPConfig"
+        }
+      },
+      "description": "NotificationChannel is a delivery target (webhook/Slack/email)."
+    },
+    "v1Point": {
+      "type": "object",
+      "properties": {
+        "timeUnixMs": {
+          "type": "string",
+          "format": "int64"
+        },
+        "value": {
+          "type": "number",
+          "format": "double"
+        }
+      }
+    },
+    "v1PortForwardOutput": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "string",
+          "format": "byte"
+        }
+      }
+    },
+    "v1PortForwardStart": {
+      "type": "object",
+      "properties": {
+        "projectId": {
+          "type": "string"
+        },
+        "environmentId": {
+          "type": "string"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "portName": {
+          "type": "string"
+        }
+      }
+    },
+    "v1PortSpec": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "\"http\" (default), \"db\", ..."
+        },
+        "containerPort": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "protocol": {
+          "$ref": "#/definitions/v1Protocol"
+        },
+        "publicL4Port": {
+          "type": "integer",
+          "format": "int64",
+          "description": "If set, the ingress proxies expose this port publicly as raw L4 TCP\npassthrough (spec F5). HTTP traffic never sets this."
+        }
+      }
+    },
+    "v1Project": {
+      "type": "object",
+      "properties": {
+        "meta": {
+          "$ref": "#/definitions/v1Meta"
+        },
+        "orgId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "title": "DNS-safe: [a-z0-9-], used in *.internal names"
+        }
+      },
+      "description": "Project scopes apps, members, volumes and internal DNS (spec F3)."
+    },
+    "v1ProjectMember": {
+      "type": "object",
+      "properties": {
+        "projectId": {
+          "type": "string"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/definitions/v1Role"
+        }
+      },
+      "description": "ProjectMember grants a user a role on a project."
+    },
+    "v1Protocol": {
+      "type": "string",
+      "enum": [
+        "PROTOCOL_UNSPECIFIED",
+        "PROTOCOL_HTTP",
+        "PROTOCOL_TCP",
+        "PROTOCOL_UDP"
+      ],
+      "default": "PROTOCOL_UNSPECIFIED",
+      "title": "- PROTOCOL_UNSPECIFIED: treated as HTTP"
+    },
+    "v1PutChannelRequest": {
+      "type": "object",
+      "properties": {
+        "channel": {
+          "$ref": "#/definitions/v1NotificationChannel"
+        }
+      }
+    },
+    "v1PutRuleRequest": {
+      "type": "object",
+      "properties": {
+        "rule": {
+          "$ref": "#/definitions/v1AlertRule"
+        }
+      }
+    },
+    "v1QueryAuditRequest": {
+      "type": "object",
+      "properties": {
+        "projectId": {
+          "type": "string",
+          "title": "\"\" = cluster (admin)"
+        },
+        "actorUserId": {
+          "type": "string"
+        },
+        "methodPrefix": {
+          "type": "string"
+        },
+        "sinceUnixMs": {
+          "type": "string",
+          "format": "int64"
+        },
+        "untilUnixMs": {
+          "type": "string",
+          "format": "int64"
+        },
+        "limit": {
+          "type": "integer",
+          "format": "int64",
+          "title": "default 100"
+        }
+      }
+    },
+    "v1QueryAuditResponse": {
+      "type": "object",
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1AuditEntry"
+          }
+        }
+      }
+    },
+    "v1Release": {
+      "type": "object",
+      "properties": {
+        "meta": {
+          "$ref": "#/definitions/v1Meta"
+        },
+        "environmentId": {
+          "type": "string"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "imageRef": {
+          "type": "string",
+          "title": "fully qualified, digest-pinned once built"
+        },
+        "configHash": {
+          "type": "string",
+          "title": "hash of ServiceSpec + env var keys/versions"
+        },
+        "service": {
+          "$ref": "#/definitions/v1ServiceSpec",
+          "title": "frozen copy of the spec at release time"
+        },
+        "source": {
+          "$ref": "#/definitions/v1ReleaseSource"
+        },
+        "createdByUserId": {
+          "type": "string"
+        }
+      },
+      "description": "Release is an immutable (image, config) pair per environment (spec §4).\nVersion numbers are per-environment and monotonic (v1, v2, ...)."
+    },
+    "v1ReleaseSource": {
+      "type": "object",
+      "properties": {
+        "gitSha": {
+          "type": "string"
+        },
+        "gitBranch": {
+          "type": "string"
+        },
+        "gitMessage": {
+          "type": "string"
+        },
+        "tarballDigest": {
+          "type": "string",
+          "title": "CLI uploads"
+        },
+        "buildId": {
+          "type": "string",
+          "title": "empty for pre-built images"
+        }
+      }
+    },
+    "v1ReplicaRange": {
+      "type": "object",
+      "properties": {
+        "min": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "max": {
+          "type": "integer",
+          "format": "int64"
+        }
+      }
+    },
+    "v1ResourceLimits": {
+      "type": "object",
+      "properties": {
+        "cpuMillis": {
+          "type": "integer",
+          "format": "int64",
+          "title": "1000 = one core"
+        },
+        "memoryMb": {
+          "type": "integer",
+          "format": "int64"
+        }
+      },
+      "description": "ResourceLimits are per-instance reservations used by placement and cgroups."
+    },
+    "v1Role": {
+      "type": "string",
+      "enum": [
+        "ROLE_UNSPECIFIED",
+        "ROLE_OWNER",
+        "ROLE_ADMIN",
+        "ROLE_DEVELOPER",
+        "ROLE_VIEWER"
+      ],
+      "default": "ROLE_UNSPECIFIED",
+      "description": "Role is the RBAC role at org or project level (spec §3.13)."
+    },
+    "v1SMTPConfig": {
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "username": {
+          "type": "string"
+        },
+        "password": {
+          "$ref": "#/definitions/v1EncryptedValue"
+        },
+        "from": {
+          "type": "string"
+        },
+        "starttls": {
+          "type": "boolean"
+        }
+      }
+    },
+    "v1Series": {
+      "type": "object",
+      "properties": {
+        "metric": {
+          "type": "string"
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "node, app, env, instance"
+        },
+        "points": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Point"
+          }
+        }
+      }
+    },
+    "v1ServiceSpec": {
+      "type": "object",
+      "properties": {
+        "replicas": {
+          "$ref": "#/definitions/v1ReplicaRange"
+        },
+        "autoscale": {
+          "$ref": "#/definitions/v1Autoscale"
+        },
+        "resources": {
+          "$ref": "#/definitions/v1ResourceLimits"
+        },
+        "ports": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1PortSpec"
+          }
+        },
+        "healthcheck": {
+          "$ref": "#/definitions/v1HealthCheck"
+        },
+        "scaleToZero": {
+          "type": "boolean"
+        },
+        "maxConcurrency": {
+          "type": "integer",
+          "format": "int64",
+          "title": "serverless mode: target in-flight per replica (0 = off)"
+        },
+        "stateful": {
+          "type": "boolean",
+          "title": "exactly-one, volume-pinned, stop-then-start deploys"
+        },
+        "volumes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1VolumeMount"
+          }
+        },
+        "cron": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1CronSpec"
+          }
+        },
+        "stopGrace": {
+          "type": "string",
+          "title": "SIGTERM → SIGKILL window, default 10s"
+        },
+        "command": {
+          "type": "string",
+          "title": "override image CMD (shell form)"
+        },
+        "placementConstraints": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "node label selectors, e.g. {\"region\": \"eu\"}"
+        }
+      },
+      "description": "ServiceSpec is the desired runtime shape of an app in one environment\n(spec §4). It is versioned into a Release via config_hash."
+    },
+    "v1SetBackupConfigRequest": {
+      "type": "object",
+      "properties": {
+        "config": {
+          "$ref": "#/definitions/v1BackupConfig"
+        },
+        "s3AccessKeyPlain": {
+          "type": "string",
+          "title": "sealed server-side"
+        },
+        "s3SecretKeyPlain": {
+          "type": "string"
+        }
+      }
+    },
+    "v1SnapshotPolicy": {
+      "type": "object",
+      "properties": {
+        "schedule": {
+          "type": "string",
+          "title": "cron expression; \"\" = manual only"
+        },
+        "preHook": {
+          "type": "string",
+          "title": "command exec'd in the service container before snapshot (e.g. pg_dump)"
+        },
+        "keepLast": {
+          "type": "integer",
+          "format": "int64",
+          "title": "retention, default 7"
+        }
+      }
+    },
+    "v1SnapshotStatus": {
+      "type": "string",
+      "enum": [
+        "SNAPSHOT_STATUS_UNSPECIFIED",
+        "SNAPSHOT_STATUS_RUNNING",
+        "SNAPSHOT_STATUS_COMPLETE",
+        "SNAPSHOT_STATUS_FAILED"
+      ],
+      "default": "SNAPSHOT_STATUS_UNSPECIFIED"
+    },
+    "v1StateChunk": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "type": "string",
+          "format": "byte"
+        }
+      }
+    },
+    "v1StatsQuery": {
+      "type": "object",
+      "properties": {
+        "nodeId": {
+          "type": "string",
+          "description": "Scope: exactly one of node_id / environment_id / app_id, or empty for cluster."
+        },
+        "appId": {
+          "type": "string"
+        },
+        "environmentId": {
+          "type": "string"
+        },
+        "metrics": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Metrics: \"cpu_percent\", \"memory_bytes\", \"memory_percent\", \"disk_bytes\",\n\"net_rx_bytes\", \"net_tx_bytes\", \"rps\", \"latency_p50_ms\", \"latency_p99_ms\",\n\"error_rate\", \"inflight\". Empty = a sensible default set."
+        },
+        "since": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "until": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "stepSeconds": {
+          "type": "integer",
+          "format": "int64",
+          "description": "Requested resolution in seconds; the server picks the nearest stored one\n(15s raw / 300s downsampled)."
+        }
+      },
+      "description": "StatsQuery reads historical series from the embedded TSDB (spec §3.10)."
+    },
+    "v1StatsResponse": {
+      "type": "object",
+      "properties": {
+        "series": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1Series"
+          }
+        }
+      }
+    },
+    "v1TerminalSize": {
+      "type": "object",
+      "properties": {
+        "cols": {
+          "type": "integer",
+          "format": "int64"
+        },
+        "rows": {
+          "type": "integer",
+          "format": "int64"
+        }
+      }
+    },
+    "v1Token": {
+      "type": "object",
+      "properties": {
+        "meta": {
+          "$ref": "#/definitions/v1Meta"
+        },
+        "userId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "secretHash": {
+          "type": "string",
+          "title": "hex SHA-256; cleared in API responses"
+        },
+        "kind": {
+          "$ref": "#/definitions/v1TokenKind"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "lastUsedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "description": "Token is an API token. Only the SHA-256 hash is stored; the plaintext is\nreturned exactly once at creation."
+    },
+    "v1TokenKind": {
+      "type": "string",
+      "enum": [
+        "TOKEN_KIND_UNSPECIFIED",
+        "TOKEN_KIND_PERSONAL",
+        "TOKEN_KIND_SESSION"
+      ],
+      "default": "TOKEN_KIND_UNSPECIFIED",
+      "title": "- TOKEN_KIND_PERSONAL: long-lived PAT\n - TOKEN_KIND_SESSION: short-lived, from Login"
+    },
+    "v1TopProcess": {
+      "type": "object",
+      "properties": {
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "v1TopResponse": {
+      "type": "object",
+      "properties": {
+        "titles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "processes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1TopProcess"
+          }
+        }
+      }
+    },
+    "v1TriggerBackupRequest": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "title": "\"state\" | \"full\""
+        }
+      }
+    },
+    "v1UploadSourceHeader": {
+      "type": "object",
+      "properties": {
+        "projectId": {
+          "type": "string"
+        },
+        "appId": {
+          "type": "string"
+        },
+        "environmentId": {
+          "type": "string"
+        },
+        "buildType": {
+          "$ref": "#/definitions/v1BuildType"
+        },
+        "gitSha": {
+          "type": "string"
+        },
+        "gitBranch": {
+          "type": "string"
+        }
+      }
+    },
+    "v1UploadSourceResponse": {
+      "type": "object",
+      "properties": {
+        "build": {
+          "$ref": "#/definitions/v1Build"
+        },
+        "deployment": {
+          "$ref": "#/definitions/v1Deployment",
+          "title": "auto-created; follows the build"
+        }
+      }
+    },
+    "v1User": {
+      "type": "object",
+      "properties": {
+        "meta": {
+          "$ref": "#/definitions/v1Meta"
+        },
+        "email": {
+          "type": "string"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "passwordHash": {
+          "type": "string"
+        },
+        "orgId": {
+          "type": "string"
+        },
+        "orgRole": {
+          "$ref": "#/definitions/v1Role"
+        }
+      },
+      "description": "User is a local user (SSO is M4+). password_hash is an argon2id PHC string;\nAPI handlers MUST clear it before returning a User to clients."
+    },
+    "v1Volume": {
+      "type": "object",
+      "properties": {
+        "meta": {
+          "$ref": "#/definitions/v1Meta"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "environmentId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string",
+          "title": "unique within (project, environment)"
+        },
+        "nodeId": {
+          "type": "string",
+          "title": "pinned node"
+        },
+        "status": {
+          "$ref": "#/definitions/v1VolumeStatus"
+        },
+        "lease": {
+          "$ref": "#/definitions/v1VolumeLease",
+          "description": "Fencing lease (spec §9.1): only the lease holder may mount the volume."
+        },
+        "snapshotPolicy": {
+          "$ref": "#/definitions/v1SnapshotPolicy"
+        },
+        "sizeBytesObserved": {
+          "type": "string",
+          "format": "uint64"
+        }
+      },
+      "description": "Volume is a named Docker volume pinned to one node (spec §3.8)."
+    },
+    "v1VolumeLease": {
+      "type": "object",
+      "properties": {
+        "nodeId": {
+          "type": "string"
+        },
+        "assignmentId": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "v1VolumeMount": {
+      "type": "object",
+      "properties": {
+        "volumeName": {
+          "type": "string",
+          "title": "references Volume.name within the same (project, env)"
+        },
+        "mountPath": {
+          "type": "string"
+        }
+      }
+    },
+    "v1VolumeSnapshot": {
+      "type": "object",
+      "properties": {
+        "meta": {
+          "$ref": "#/definitions/v1Meta"
+        },
+        "volumeId": {
+          "type": "string"
+        },
+        "manifestKey": {
+          "type": "string",
+          "title": "S3 key of the snapshot manifest"
+        },
+        "logicalSizeBytes": {
+          "type": "string",
+          "format": "uint64"
+        },
+        "uploadedBytes": {
+          "type": "string",
+          "format": "uint64",
+          "title": "after dedup"
+        },
+        "status": {
+          "$ref": "#/definitions/v1SnapshotStatus"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "description": "VolumeSnapshot is one point-in-time S3 snapshot (spec §3.11)."
+    },
+    "v1VolumeStatus": {
+      "type": "string",
+      "enum": [
+        "VOLUME_STATUS_UNSPECIFIED",
+        "VOLUME_STATUS_ACTIVE",
+        "VOLUME_STATUS_NODE_LOST",
+        "VOLUME_STATUS_RESTORING"
+      ],
+      "default": "VOLUME_STATUS_UNSPECIFIED",
+      "title": "- VOLUME_STATUS_NODE_LOST: pinned node is down; stateful service stopped by design"
+    },
+    "v1WhoAmIResponse": {
+      "type": "object",
+      "properties": {
+        "user": {
+          "$ref": "#/definitions/v1User"
+        },
+        "memberships": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/v1ProjectMember"
+          }
+        }
+      }
+    },
+    "v1WriteFileHeader": {
+      "type": "object",
+      "properties": {
+        "projectId": {
+          "type": "string"
+        },
+        "volumeId": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "integer",
+          "format": "int64"
+        }
+      }
+    }
+  }
+}

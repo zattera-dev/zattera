@@ -1,0 +1,34 @@
+version: "2"
+
+run:
+  timeout: 5m
+  build-tags: []
+
+linters:
+  default: standard
+  enable:
+    - misspell
+    - unconvert
+    - unparam
+    - nolintlint
+  settings:
+    staticcheck:
+      checks: ["all", "-ST1000", "-ST1003"]
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - unparam
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/zattera-dev/zattera
