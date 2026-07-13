@@ -26,6 +26,7 @@ import (
 	clusterv1 "github.com/zattera-dev/zattera/api/gen/zattera/cluster/v1"
 	zatterav1 "github.com/zattera-dev/zattera/api/gen/zattera/v1"
 	"github.com/zattera-dev/zattera/internal/config"
+	"github.com/zattera-dev/zattera/internal/daemon/mesh"
 	"github.com/zattera-dev/zattera/internal/daemon/nodeinfo"
 	"github.com/zattera-dev/zattera/internal/pkgutil/version"
 )
@@ -47,9 +48,10 @@ type joinResult struct {
 	MeshEnabled     bool   `json:"mesh_enabled"`
 
 	// On-disk material (not serialized into mesh.json).
-	caPEM   []byte `json:"-"`
-	certPEM []byte `json:"-"`
-	keyPEM  []byte `json:"-"`
+	caPEM        []byte             `json:"-"`
+	certPEM      []byte             `json:"-"`
+	keyPEM       []byte             `json:"-"`
+	initialPeers *clusterv1.PeerSet `json:"-"`
 }
 
 // runJoin enrolls this node with a control plane: it pins the cluster CA from
@@ -76,15 +78,28 @@ func runJoin(ctx context.Context, cfg config.Config, log *slog.Logger) (*joinRes
 	}
 	defer func() { _ = conn.Close() }()
 
+	// Advertise a WireGuard public key so the control plane can register this
+	// node in the mesh. Harmless when the cluster runs mesh-disabled. The
+	// device (T-19) reuses the same key path so the running key matches.
+	var wgPub string
+	if k, kerr := mesh.EnsureNodeKey(wgKeyPath(cfg.DataDir)); kerr != nil {
+		log.Warn("mesh: could not prepare wireguard key", "err", kerr)
+	} else {
+		wgPub = k
+	}
+
 	capacity := nodeinfo.Detect(cfg.DataDir, log)
 	resp, err := clusterv1.NewJoinServiceClient(conn).Join(ctx, &clusterv1.JoinRequest{
-		TokenSecret:    secret,
-		NodeName:       cfg.NodeName,
-		CsrPem:         csrPEM,
-		OsArch:         runtime.GOOS + "/" + runtime.GOARCH,
-		BinaryVersion:  version.Version,
-		Capacity:       &zatterav1.ResourceLimits{CpuMillis: capacity.CPUMillis, MemoryMb: capacity.MemoryMB},
-		CapacityDiskMb: capacity.DiskMB,
+		TokenSecret:         secret,
+		NodeName:            cfg.NodeName,
+		CsrPem:              csrPEM,
+		OsArch:              runtime.GOOS + "/" + runtime.GOARCH,
+		BinaryVersion:       version.Version,
+		Capacity:            &zatterav1.ResourceLimits{CpuMillis: capacity.CPUMillis, MemoryMb: capacity.MemoryMB},
+		CapacityDiskMb:      capacity.DiskMB,
+		WireguardPublicKey:  wgPub,
+		WireguardListenPort: uint32(meshListenPort(cfg)),
+		PublicEndpoints:     cfg.Mesh.PublicEndpoints,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("daemon: join rpc: %w", err)
@@ -105,6 +120,7 @@ func runJoin(ctx context.Context, cfg config.Config, log *slog.Logger) (*joinRes
 		caPEM:           resp.GetCaCertPem(),
 		certPEM:         resp.GetNodeCertPem(),
 		keyPEM:          keyPEM,
+		initialPeers:    resp.GetInitialPeers(),
 	}
 	if err := persistJoin(cfg.DataDir, res); err != nil {
 		return nil, err

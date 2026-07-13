@@ -156,7 +156,7 @@ func (s *JoinServer) registerNode(ctx context.Context, nodeID string, roles []za
 		labels["zattera.dev/os-arch"] = req.GetOsArch()
 	}
 
-	isControl := hasRole(roles, zatterav1.NodeRole_NODE_ROLE_CONTROL)
+	isControl := hasControlRole(roles)
 	now := timestamppb.New(s.clock.Now())
 
 	for attempt := 0; attempt < meshIPRetries; attempt++ {
@@ -203,7 +203,7 @@ func (s *JoinServer) buildInitialPeers() *clusterv1.PeerSet {
 	}
 	var peers []*clusterv1.Peer
 	for _, n := range s.store.ListNodes() {
-		if !hasRole(n.GetRoles(), zatterav1.NodeRole_NODE_ROLE_CONTROL) || n.GetWireguardPublicKey() == "" {
+		if !hasControlRole(n.GetRoles()) || n.GetWireguardPublicKey() == "" {
 			continue
 		}
 		peers = append(peers, &clusterv1.Peer{
@@ -270,9 +270,10 @@ func meshIPTaken(nodes []*zatterav1.Node, selfID, meshIP string) bool {
 	return false
 }
 
-func hasRole(roles []zatterav1.NodeRole, want zatterav1.NodeRole) bool {
+// hasControlRole reports whether the node carries the control-plane role.
+func hasControlRole(roles []zatterav1.NodeRole) bool {
 	for _, r := range roles {
-		if r == want {
+		if r == zatterav1.NodeRole_NODE_ROLE_CONTROL {
 			return true
 		}
 	}

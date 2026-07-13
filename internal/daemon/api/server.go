@@ -57,6 +57,8 @@ type Options struct {
 	AgentSyncService clusterv1.AgentSyncServiceServer
 	// JoinService is token-authenticated (no mTLS), no REST gateway.
 	JoinService clusterv1.JoinServiceServer
+	// MeshService distributes WireGuard peer sets (mTLS node identity).
+	MeshService clusterv1.MeshServiceServer
 
 	// Interceptors run in the given order (auth → rbac → audit → leader-forward
 	// per later tasks). Health checks bypass them via a method skip inside each.
@@ -224,6 +226,9 @@ func registerGRPC(s *grpc.Server, opts Options) {
 	}
 	if opts.JoinService != nil {
 		clusterv1.RegisterJoinServiceServer(s, opts.JoinService)
+	}
+	if opts.MeshService != nil {
+		clusterv1.RegisterMeshServiceServer(s, opts.MeshService)
 	}
 }
 

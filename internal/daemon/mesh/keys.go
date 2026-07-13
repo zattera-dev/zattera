@@ -43,3 +43,15 @@ func loadOrCreatePrivateKey(path string) (wgtypes.Key, error) {
 // hexKey encodes a key as lowercase hex — the form the WireGuard uapi expects
 // (device.IpcSet), distinct from the base64 form Key.String() emits.
 func hexKey(k wgtypes.Key) string { return hex.EncodeToString(k[:]) }
+
+// EnsureNodeKey loads or creates the WG private key at path and returns its
+// public key (base64). A joining node calls this to advertise its public key in
+// the join request before the device is brought up; Up reuses the same path so
+// the advertised key matches the running device.
+func EnsureNodeKey(path string) (string, error) {
+	k, err := loadOrCreatePrivateKey(path)
+	if err != nil {
+		return "", err
+	}
+	return k.PublicKey().String(), nil
+}

@@ -210,7 +210,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 		Listen:           cfg.API.Listen,
 		Logger:           log,
 		DNSNames:         serverDNSNames(cfg),
-		IPs:              serverIPs(),
+		IPs:              serverIPs(cfg),
 		AuthService:      api.NewAuthServer(st, rs, clk),
 		ProjectService:   api.NewProjectServer(st, rs, clk, rbac),
 		AppService:       api.NewAppServer(st, rs, clk, sealer),
@@ -219,6 +219,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 		AuditService:     auditor,
 		AgentSyncService: syncSrv,
 		JoinService:      joinSrv,
+		MeshService:      api.NewMeshServer(st, clk, log),
 		UnaryInterceptors: []grpc.UnaryServerInterceptor{
 			forwarder.UnaryInterceptor, authn.UnaryInterceptor, rbac.UnaryInterceptor, auditor.UnaryInterceptor,
 		},
@@ -229,6 +230,17 @@ func Run(ctx context.Context, cfg config.Config) error {
 	}
 	apiErr := make(chan error, 1)
 	go func() { apiErr <- apiSrv.Serve(ctx) }()
+
+	// Mesh (T-19): on a mesh-enabled control node, bring WireGuard up as the hub
+	// and keep its own peer set in sync. Single-node/dev disables the mesh.
+	if !cfg.Mesh.Disabled && rs.IsLeader() {
+		meshMgr, err := startControlMesh(ctx, cfg, rs, authority, nodeID, log)
+		if err != nil {
+			log.Warn("mesh bring-up failed; continuing without mesh", "err", err)
+		} else {
+			defer func() { _ = meshMgr.Down(context.Background()) }()
+		}
+	}
 
 	// Node agent (T-14): on worker-capable nodes, open the AgentSync stream to
 	// the control plane and send heartbeats. In single-node/dev the control
@@ -315,10 +327,17 @@ func serverDNSNames(cfg config.Config) []string {
 	return names
 }
 
-// serverIPs returns the IP SANs. 127.0.0.1 is always present (the gateway
-// dials the public port over loopback); the mesh IP is added in T-19.
-func serverIPs() []net.IP {
-	return []net.IP{net.ParseIP("127.0.0.1")}
+// serverIPs returns the IP SANs. 127.0.0.1 is always present (the gateway dials
+// the public port over loopback); the control node's mesh IP is added when the
+// mesh is enabled so joined nodes can verify the API cert over the tunnel.
+func serverIPs(cfg config.Config) []net.IP {
+	ips := []net.IP{net.ParseIP("127.0.0.1")}
+	if ip := controlMeshIP(cfg); ip != "" {
+		if parsed := net.ParseIP(ip); parsed != nil {
+			ips = append(ips, parsed)
+		}
+	}
+	return ips
 }
 
 // leaderAPIResolver maps the current raft leader to its API address for
@@ -399,6 +418,16 @@ func localAgentDialer(authority *ca.CA, nodeID, apiListen string, log *slog.Logg
 // It runs no local raft or control API. Mesh transport (T-18..20) is wired in
 // later; until then the control address must be directly reachable.
 func runWorker(ctx context.Context, cfg config.Config, jr *joinResult, log *slog.Logger) error {
+	// Bring the worker's WireGuard device up first (when the cluster uses a
+	// mesh) so the control plane's mesh IP is routable for the agent stream.
+	if jr.MeshEnabled {
+		meshMgr, err := startWorkerMesh(ctx, cfg, jr, log)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = meshMgr.Down(context.Background()) }()
+	}
+
 	dial, err := workerAgentDialer(jr)
 	if err != nil {
 		return err
@@ -466,15 +495,12 @@ func workerAgentDialer(jr *joinResult) (func(context.Context) (*agent.Conn, erro
 }
 
 // agentHostIP is where the executor publishes container ports and where joined
-// nodes reach the control plane. Single-node/dev (mesh disabled) uses loopback;
-// the allocated mesh IP is threaded through once the mesh is up (T-19).
-//
-//nolint:unparam // cfg selects the mesh IP branch once the mesh lands (T-19).
+// nodes reach the control plane: the mesh IP when the mesh is enabled, else
+// loopback (single-node/dev).
 func agentHostIP(cfg config.Config) string {
-	if cfg.Mesh.Disabled {
-		return "127.0.0.1"
+	if ip := controlMeshIP(cfg); ip != "" {
+		return ip
 	}
-	// TODO(T-19): return the node's allocated mesh IP.
 	return "127.0.0.1"
 }
 
