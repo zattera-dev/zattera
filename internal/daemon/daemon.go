@@ -215,6 +215,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 		AuthService:      api.NewAuthServer(st, rs, clk),
 		ProjectService:   api.NewProjectServer(st, rs, clk, rbac),
 		AppService:       api.NewAppServer(st, rs, clk, sealer),
+		DeployService:    api.NewDeployServer(st, rs, clk),
 		StateService:     api.NewStateServer(st, rs, clk),
 		NodeService:      api.NewNodeServer(st, rs, clk, authority),
 		AuditService:     auditor,
