@@ -1,0 +1,25 @@
+# Fixture: intra-cluster, cross-node service-to-service communication.
+#
+# Runs 3 replicas (the scheduler spreads them one per node on a 3-node cluster).
+# Each replica reaches its siblings over the internal DNS name "mesh.internal",
+# which resolves to the environment's service VIP and load-balances across every
+# healthy replica in the cluster. GET / on any replica reports which distinct
+# replicas it reached — the proof that traffic crossed nodes over the mesh.
+[app]
+name = "mesh"
+
+[build]
+type = "dockerfile"
+
+[deploy]
+healthcheck = { path = "/healthz", timeout = "5s" }
+
+[env.production]
+min_replicas = 3
+max_replicas = 3
+
+# A declared TCP port is what gives the service its internal VIP + DNS name.
+[[env.production.ports]]
+name = "http"
+container_port = 8080
+protocol = "tcp"

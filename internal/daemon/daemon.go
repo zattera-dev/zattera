@@ -99,7 +99,8 @@ func Commands() []*cobra.Command {
 	server.Flags().StringVar(&joinTo, "join", "", "control-plane address to join (host:8443)")
 	server.Flags().StringVar(&token, "token", "", "join token")
 
-	return []*cobra.Command{server}
+	// `server` runs the node; init/join/teardown manage its lifecycle on a host.
+	return append([]*cobra.Command{server}, nodeCommands()...)
 }
 
 // Run boots the node and blocks until ctx is canceled or a signal arrives.

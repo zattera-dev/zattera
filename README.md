@@ -2,7 +2,7 @@
 
 # ⛵ Zattera
 
-**The single-binary PaaS. Your servers, better DX.**
+**The single-binary PaaS. Deploy applications across any pool of machines with one command.**
 
 _Zattera — Italian for "raft". It runs on Raft consensus._
 
@@ -20,14 +20,17 @@ _Zattera — Italian for "raft". It runs on Raft consensus._
 Turn any pool of machines — bare metal, VPS, multi-cloud, the server under your desk — into a Heroku/Vercel-grade platform. **Just one Go binary** that is the CLI, the control plane, the scheduler, the proxy, the cert manager, and the registry. The only thing your servers need is Docker, no other dependencies.
 
 ```bash
-# on your first server
+# 1. on your first server — start the cluster
 curl -fsSL https://get.zattera.dev | sh
+sudo zattera cluster init          # asks for a domain, prints your login + join commands
 
-# on every other machine, anywhere in the world
-curl -fsSL https://get.zattera.dev | sh -s -- --join zattera.example.com --token <JOIN_TOKEN>
+# 2. on every other machine, anywhere in the world — join it
+#    (cluster init prints this line for you, address + token filled in)
+curl -fsSL https://get.zattera.dev | sh && sudo zattera cluster join <control-ip>:8443 --token <JOIN_TOKEN>
 
-# on your laptop
-zattera deploy --prod
+# 3. from your laptop — log in and deploy
+zt login --server https://<control-ip>:8443 --ca-pin <FINGERPRINT> --token <ADMIN_TOKEN> --context prod
+zt deploy --prod
 ```
 
 ```
@@ -49,7 +52,7 @@ Every alternative makes you choose: a web panel bolted on Docker with no real or
 ## Features
 
 - **Nodes anywhere** — WireGuard mesh + gossip: multi-region, multi-cloud, NAT'd home servers, all first-class. Starts at **one node**; grow with a single `--join`, drain and remove nodes freely.
-- **Deploy anything** — Nixpacks auto-detection or Dockerfile, built on your own builders, stored in the embedded registry.
+- **Deploy anything** — Nixpacks auto-detection or Dockerfile, built on your own builders, stored in the embedded registry (no need for an external docker registry).
 - **Vercel-style flow** — `zattera deploy --prod`, GitHub push-to-deploy, staging/production/preview environments, env vars & secrets, custom domains + automatic Let's Encrypt.
 - **Red/green releases** — new version fully healthy before traffic switches; instant rollback.
 - **Scale** — replica autoscaling, load balancing across nodes, scale-to-zero with wake-on-request, serverless concurrency mode.
@@ -61,7 +64,7 @@ Every alternative makes you choose: a web panel bolted on Docker with no real or
 
 ## What Zattera does
 
-> **Status note:** Pre-alpha. The spec is complete and core foundations exist (Raft, protos, scheduler, mesh, registry), but M1 (deploy → HTTPS → rollback end-to-end) is not finished yet. Most items below are designed/planned, not all shipped today.
+> **Status note:** Pre-alpha. Zattera.dev is an ambitious PoC/experiment, the base structure is entirely "vibe-coded" even if architectural choices and most of the tests are taken seriously by the mantainer. We are looking for alpha testers.
 
 ### Platform model
 
@@ -147,8 +150,6 @@ Zattera's edge is not a longer feature list — it's focus on the deploy-and-run
 | Distributed volume replication  | Longhorn, Ceph             | Honest RPO via snapshots, not fake HA           |
 | Vendor-hosted builds/images     | Vercel, Railway, Fly       | Builds and images stay on your metal            |
 
-See [What we deliberately don't do](./paas-specification.md#101-what-we-deliberately-dont-do) in the full specification.
-
 ## How Zattera compares
 
 | Capability                      | **Zattera**       | **Dokploy**     | **Kubernetes**  | **Coolify**            | **Kamal**          |
@@ -172,8 +173,6 @@ See [What we deliberately don't do](./paas-specification.md#101-what-we-delibera
 
 **Pick Kamal** if you want minimal explicit deploys to known hosts and will manage scaling and state yourself.
 
-Read the full [comparison](./paas-specification.md#10-comparison--zattera-vs-the-field) in the specification.
-
 ## How it works
 
 ```
@@ -186,10 +185,6 @@ Read the full [comparison](./paas-specification.md#10-comparison--zattera-vs-the
 ```
 
 Desired state is declared, replicated via Raft, and continuously reconciled. Kill a node: stateless replicas reschedule in seconds. Export the whole platform as YAML with `zattera state export`. Read the full [specification](./paas-specification.md).
-
-## Status
-
-⚠️ **Pre-alpha — spec stage.** The [specification](./paas-specification.md) is complete; implementation is starting with the [M1 milestone](./paas-specification.md#8-roadmap) (single control node, builds, red/green deploys, proxy + ACME, CLI, GitHub integration). Star the repo to follow along, open a Discussion to influence the design.
 
 ## Non-goals
 
