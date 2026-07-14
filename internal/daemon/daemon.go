@@ -41,6 +41,7 @@ import (
 	"github.com/zattera-dev/zattera/internal/daemon/livestate"
 	"github.com/zattera-dev/zattera/internal/daemon/logstore"
 	"github.com/zattera-dev/zattera/internal/daemon/nodeinfo"
+	"github.com/zattera-dev/zattera/internal/daemon/proxy"
 	"github.com/zattera-dev/zattera/internal/daemon/raftstore"
 	crt "github.com/zattera-dev/zattera/internal/daemon/runtime"
 	"github.com/zattera-dev/zattera/internal/daemon/scheduler"
@@ -458,6 +459,13 @@ func Run(ctx context.Context, cfg config.Config) error {
 			}
 		}()
 
+		// Internal service mesh (F26): VIP proxy + internal DNS, reading routes
+		// in-process from the RouteBuilder. Runs on the co-located control+worker
+		// so its own containers can reach <svc>.internal.
+		if !cfg.Dev && rt != nil {
+			startInternalMesh(ctx, routeSource, na.Executor(), log)
+		}
+
 		// Agent-local service (T-54): serve build/exec/port-forward/logs on :8444
 		// with node mTLS so the control plane can dispatch builds, interactive
 		// sessions and log queries to this node. Needs a container runtime.
@@ -698,13 +706,30 @@ func runWorker(ctx context.Context, cfg config.Config, jr *joinResult, log *slog
 		RegistryAuth: regAuth,
 		Dial:         dial,
 	})
+
+	// Internal service mesh: subscribe to route snapshots from control, then run
+	// the VIP proxy + internal DNS so containers on this worker can reach
+	// <svc>.internal (F26). Best-effort — the executor still works without it.
+	if !cfg.Dev && rt != nil {
+		if creds, cerr := workerTLSCreds(jr); cerr != nil {
+			log.Warn("intdns: route credentials", "err", cerr)
+		} else {
+			rc := proxy.NewRouteClient(
+				grpcRouteDialer{addr: jr.ControlGRPCAddr, nodeID: jr.NodeID, creds: creds},
+				jr.NodeID, filepath.Join(cfg.DataDir, "proxy", "routes.pb"), log)
+			go rc.Run(ctx)
+			startInternalMesh(ctx, rc, na.Executor(), log)
+		}
+	}
+
 	log.Info("worker started", "node", jr.NodeID, "control", jr.ControlGRPCAddr)
 	return na.Run(ctx)
 }
 
-// workerAgentDialer dials the control plane's AgentSync over mTLS with the
-// node's signed identity, trusting the cluster CA from the join response.
-func workerAgentDialer(jr *joinResult) (func(context.Context) (*agent.Conn, error), error) {
+// workerTLSCreds builds the node-mTLS transport credentials a worker uses to
+// dial the control plane: the join-issued node cert/key, trusting the cluster CA
+// from the join response, with the control host as SNI.
+func workerTLSCreds(jr *joinResult) (credentials.TransportCredentials, error) {
 	cert, err := tls.X509KeyPair(jr.certPEM, jr.keyPEM)
 	if err != nil {
 		return nil, fmt.Errorf("daemon: load node cert: %w", err)
@@ -717,12 +742,21 @@ func workerAgentDialer(jr *joinResult) (func(context.Context) (*agent.Conn, erro
 	if err != nil {
 		host = jr.ControlGRPCAddr
 	}
-	creds := credentials.NewTLS(&tls.Config{
+	return credentials.NewTLS(&tls.Config{
 		MinVersion:   tls.VersionTLS12,
 		Certificates: []tls.Certificate{cert},
 		RootCAs:      pool,
 		ServerName:   host,
-	})
+	}), nil
+}
+
+// workerAgentDialer dials the control plane's AgentSync over mTLS with the
+// node's signed identity, trusting the cluster CA from the join response.
+func workerAgentDialer(jr *joinResult) (func(context.Context) (*agent.Conn, error), error) {
+	creds, err := workerTLSCreds(jr)
+	if err != nil {
+		return nil, err
+	}
 	return func(context.Context) (*agent.Conn, error) {
 		conn, err := grpc.NewClient(jr.ControlGRPCAddr, grpc.WithTransportCredentials(creds))
 		if err != nil {

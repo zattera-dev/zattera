@@ -2,7 +2,8 @@
 
 # ⛵ Zattera
 
-**The single-binary PaaS. Deploy applications across any pool of machines with one command.**
+**The single-binary PaaS.**
+**Deploy applications across any pool of machines with one command.**
 
 _Zattera — Italian for "raft". It runs on Raft consensus._
 
@@ -17,7 +18,7 @@ _Zattera — Italian for "raft". It runs on Raft consensus._
 
 ---
 
-Turn any pool of machines — bare metal, VPS, multi-cloud, the server under your desk — into a Heroku/Vercel-grade platform. **Just one Go binary** that is the CLI, the control plane, the scheduler, the proxy, the cert manager, and the registry. The only thing your servers need is Docker, no other dependencies.
+Turn any pool of machines — bare metal, VPS, multi-cloud, the server under your desk — into a Heroku/Vercel-like cluster platform. **Just one Go binary** that is the CLI, the control plane, the scheduler, the proxy, the cert manager, and the registry. The only thing your servers need is Docker, no other dependencies.
 
 ```bash
 # 1. on your first server — start the cluster
