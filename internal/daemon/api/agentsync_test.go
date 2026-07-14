@@ -54,19 +54,27 @@ func TestSyncServerRuntimePayload(t *testing.T) {
 	if rt.GetEnv()["TOKEN"] != "s3cr3t" {
 		t.Fatalf("env not decrypted: %+v", rt.GetEnv())
 	}
+	// Platform-injected PORT comes from the first container port (T-50).
+	if rt.GetEnv()["PORT"] != "8080" {
+		t.Fatalf("PORT not injected: %+v", rt.GetEnv())
+	}
 
 	// Unknown release → nil payload (agent will report FAILED).
 	if s.buildRuntime(&zatterav1.Assignment{Meta: &zatterav1.Meta{Id: "a2"}, ReleaseId: "missing"}) != nil {
 		t.Fatal("unknown release should yield nil runtime payload")
 	}
 
-	// Without a sealer, env is omitted but image/spec still resolve.
+	// Without a sealer, sealed user vars are omitted but image/spec resolve and
+	// platform vars (PORT) are still injected.
 	noSeal := NewSyncServer(st, nil, livestate.New(clock.NewFake()), clock.NewFake(), nil, nil)
 	rt2 := noSeal.buildRuntime(&zatterav1.Assignment{Meta: &zatterav1.Meta{Id: "a1"}, ReleaseId: "rel1", EnvironmentId: "env1"})
 	if rt2 == nil || rt2.GetImageRef() == "" {
 		t.Fatal("image/spec should resolve without a sealer")
 	}
-	if len(rt2.GetEnv()) != 0 {
-		t.Fatalf("env should be omitted without a sealer, got %+v", rt2.GetEnv())
+	if _, leaked := rt2.GetEnv()["TOKEN"]; leaked {
+		t.Fatalf("sealed var must not appear without a sealer, got %+v", rt2.GetEnv())
+	}
+	if rt2.GetEnv()["PORT"] != "8080" {
+		t.Fatalf("PORT should still be injected without a sealer, got %+v", rt2.GetEnv())
 	}
 }

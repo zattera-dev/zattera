@@ -162,7 +162,10 @@ func (s *AppServer) ApplyAppConfig(ctx context.Context, req *zatterav1.ApplyAppC
 	}, nil
 }
 
-// SetEnvVars seals each value and applies the set/unset batch.
+// SetEnvVars seals each value and applies the set/unset batch. v1 semantics:
+// changing env vars does NOT hot-restart running instances; the change folds
+// into the next release's config hash (via DeployServer.envVarVersion) and
+// takes effect on the next deploy or rollback.
 func (s *AppServer) SetEnvVars(ctx context.Context, req *zatterav1.SetEnvVarsRequest) (*emptypb.Empty, error) {
 	env, err := s.resolveEnv(req.GetProjectId(), req.GetEnvironmentId())
 	if err != nil {

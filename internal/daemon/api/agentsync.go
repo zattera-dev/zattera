@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strconv"
 	"sync"
 	"time"
 
@@ -221,8 +222,12 @@ func (s *SyncServer) buildRuntime(a *zatterav1.Assignment) *clusterv1.Assignment
 	if subnet, ok := s.store.NetworkAllocation(a.GetProjectId(), a.GetEnvironmentId(), a.GetNodeId()); ok {
 		rt.SubnetCidr = subnet
 	}
+	// Env vars: user-set (decrypted) values first, then platform-injected vars
+	// (T-50). ZATTERA_ENV/ZATTERA_APP are authoritative identity and override
+	// any user value; PORT defaults to the first port but respects a user
+	// override.
+	env := map[string]string{}
 	if s.sealer != nil {
-		env := map[string]string{}
 		for k, ev := range s.store.EnvVars(a.GetEnvironmentId()) {
 			pt, err := s.sealer.Open(ev)
 			if err != nil {
@@ -231,11 +236,28 @@ func (s *SyncServer) buildRuntime(a *zatterav1.Assignment) *clusterv1.Assignment
 			}
 			env[k] = string(pt)
 		}
-		if len(env) > 0 {
-			rt.Env = env
-		}
+	}
+	s.injectPlatformEnv(env, a, rel)
+	if len(env) > 0 {
+		rt.Env = env
 	}
 	return rt
+}
+
+// injectPlatformEnv layers the platform-provided variables onto env: PORT (the
+// first container port, unless the user set one), ZATTERA_ENV and ZATTERA_APP.
+func (s *SyncServer) injectPlatformEnv(env map[string]string, a *zatterav1.Assignment, rel *zatterav1.Release) {
+	if ports := rel.GetService().GetPorts(); len(ports) > 0 && ports[0].GetContainerPort() > 0 {
+		if _, ok := env["PORT"]; !ok {
+			env["PORT"] = strconv.Itoa(int(ports[0].GetContainerPort()))
+		}
+	}
+	if envRec, ok := s.store.Environment(a.GetEnvironmentId()); ok && envRec.GetName() != "" {
+		env["ZATTERA_ENV"] = envRec.GetName()
+	}
+	if app, ok := s.store.App(a.GetAppId()); ok && app.GetName() != "" {
+		env["ZATTERA_APP"] = app.GetName()
+	}
 }
 
 // runStatusFlusher commits buffered observed-status batches at most once per
