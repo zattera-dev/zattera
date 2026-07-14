@@ -216,6 +216,11 @@ func (s *SyncServer) buildRuntime(a *zatterav1.Assignment) *clusterv1.Assignment
 		ImageRef: rel.GetImageRef(),
 		Spec:     rel.GetService(),
 	}
+	// Per-(project,env,node) bridge subnet (T-46): the scheduler allocates it;
+	// the agent attaches the container and points its DNS at the gateway.
+	if subnet, ok := s.store.NetworkAllocation(a.GetProjectId(), a.GetEnvironmentId(), a.GetNodeId()); ok {
+		rt.SubnetCidr = subnet
+	}
 	if s.sealer != nil {
 		env := map[string]string{}
 		for k, ev := range s.store.EnvVars(a.GetEnvironmentId()) {

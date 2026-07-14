@@ -150,6 +150,9 @@ message AssignmentRuntime {
   string image_ref = 1;
   zattera.v1.ServiceSpec spec = 2;
   map<string, string> env = 3; // decrypted; stream-only, never persisted
+  // Per-(project,env,node) Docker bridge subnet the agent attaches the
+  // container to (T-46); control fills it from the NetworkAllocation.
+  string subnet_cidr = 4;
 }
 
 message ActivateService {

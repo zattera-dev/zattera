@@ -329,6 +329,27 @@ func (e *Executor) containerSpec(ctx context.Context, a *zatterav1.Assignment, r
 		})
 	}
 
+	// Per-(project,env,node) bridge network (T-46): control sends the allocated
+	// subnet; attach the container and point its DNS at the network gateway
+	// (where the internal resolver binds, T-47).
+	var network string
+	var dns []string
+	if subnet := rt.GetSubnetCidr(); subnet != "" {
+		name := NetworkName(a.GetProjectId(), a.GetEnvironmentId())
+		info, err := e.rt.EnsureNetwork(ctx, runtime.NetworkSpec{Name: name, Subnet: subnet, Labels: e.labels(a, "")})
+		if err != nil {
+			return runtime.ContainerSpec{}, fmt.Errorf("ensure network %s: %w", name, err)
+		}
+		network = info.Name
+		gw := info.Gateway
+		if gw == "" {
+			gw, _ = GatewayIP(subnet)
+		}
+		if gw != "" {
+			dns = []string{gw}
+		}
+	}
+
 	var command []string
 	if c := strings.TrimSpace(spec.GetCommand()); c != "" {
 		command = []string{"/bin/sh", "-c", c}
@@ -353,6 +374,8 @@ func (e *Executor) containerSpec(ctx context.Context, a *zatterav1.Assignment, r
 		},
 		Restart:   runtime.RestartUnlessStopped,
 		StopGrace: stopGrace,
+		Network:   network,
+		DNS:       dns,
 	}, nil
 }
 
