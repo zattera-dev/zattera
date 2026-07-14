@@ -32,6 +32,10 @@ func Commands() []*cobra.Command {
 		newEnvCmd(),
 		newInitCmd(),
 		newApplyCmd(),
+		newDeployCmd(),
+		newPsCmd(),
+		newReleasesCmd(),
+		newRollbackCmd(),
 		newStateCmd(),
 		newNodesCmd(),
 	}
