@@ -2,9 +2,9 @@
 
 # ⛵ Zattera
 
-**The single-binary PaaS. Your servers, the Vercel experience.**
+**The single-binary PaaS. Your servers, better DX.**
 
-_Zattera — Italian for "raft". It runs on Raft._
+_Zattera — Italian for "raft". It runs on Raft consensus._
 
 [zattera.dev](https://zattera.dev) · [Docs](https://zattera.dev/docs) · [Quickstart](https://zattera.dev/docs/getting-started/quickstart)
 
@@ -17,7 +17,7 @@ _Zattera — Italian for "raft". It runs on Raft._
 
 ---
 
-Turn any pool of machines — bare metal, VPS, multi-cloud, the server under your desk — into a Heroku/Vercel-grade platform. **One Go binary** that is the CLI, the control plane, the scheduler, the proxy, the cert manager, and the registry. The only thing your servers need is Docker.
+Turn any pool of machines — bare metal, VPS, multi-cloud, the server under your desk — into a Heroku/Vercel-grade platform. **Just one Go binary** that is the CLI, the control plane, the scheduler, the proxy, the cert manager, and the registry. The only thing your servers need is Docker, no other dependencies.
 
 ```bash
 # on your first server
@@ -38,12 +38,12 @@ zattera deploy --prod
 
 ## Why Zattera
 
-Every alternative makes you choose: a web panel bolted on Docker with no real orchestration (Coolify, Dokploy), a bare CLI that leaves scheduling and state to you (Kamal), or the full cloud experience _if_ you operate Kubernetes first (Kubero, Cozystack). Zattera takes the untaken quadrant: **real multi-server orchestration with zero platform dependencies.**
+Every alternative makes you choose: a web panel bolted on Docker with no real orchestration (Coolify, Dokploy), a bare CLI that leaves scheduling and state to you (Kamal), or the full cloud experience _if_ you operate Kubernetes first (Kubero, Cozystack). Zattera takes the untaken quadrant: **multi-server orchestration with zero platform dependencies.**
 
-- **No Kubernetes.** No etcd, no CNI/CSI/Ingress zoo, no YAML sprawl.
-- **No external database.** State lives in embedded Raft — the platform that runs your Postgres doesn't die when _its_ Postgres dies. It doesn't have one.
-- **No web-stack panel on your servers.** Workers run an agent measured in tens of MB, not a 2GB dashboard.
-- **No bundled nginx/Traefik/certbot.** Proxy and ACME live in-process. No config generation, no version skew, no "cert renewed but proxy didn't reload".
+- **No Kubernetes.** No etcd, no CNI/CSI/Ingress zoo, no YAML sprawl. (Setting up the infrastracture should't require you 5 kubernetes dev-ops)
+- **No external database.** State lives in embedded Raft — the platform that runs your Postgres doesn't die when _its_ Postgres dies. It doesn't depend on one.
+- **No web-stack panel on your servers.** Workers run an agent measured in tens of MB, not a 2GB bloated dashboard.
+- **No bundled nginx/Traefik/certbot.** Proxy and HTTPS automatic certificates live in-process. No config generation, no version skew, no "cert renewed but proxy didn't reload".
 - **No vendor anything.** Builds, images, logs, metrics — all on your metal. Works air-gapped.
 
 ## Features
