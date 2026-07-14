@@ -165,16 +165,15 @@ func (s *Scheduler) evaluateEnv(ctx context.Context, st *state.Store, env *zatte
 
 	var puts []*zatterav1.Assignment
 
-	// Scale up: place the shortfall. Spread is handled by pickNodes' scoring; no
-	// exclusions (a replacement may co-locate when nodes are scarce).
+	// Scale up: place the shortfall (T-24 placement). Spread is handled by the
+	// scorer; no exclusions (a replacement may co-locate when nodes are scarce).
 	if missing := desired - len(good); missing > 0 && rel != nil {
-		nodes := s.pickNodes(st, env, missing, nil)
+		nodes, err := Place(st, rel.GetService(), envID, missing, nil)
 		for _, nodeID := range nodes {
 			puts = append(puts, newAssignment(env, rel, nodeID))
 		}
-		if len(nodes) < missing {
-			s.emitEvent(ctx, env, "schedule.no_capacity", "warning",
-				"insufficient capacity: needed %d more replica(s), placed %d", missing, len(nodes))
+		if err != nil {
+			s.emitEvent(ctx, env, "schedule.no_capacity", "warning", "%v", err)
 		}
 	}
 
@@ -222,61 +221,6 @@ func (s *Scheduler) applyBatch(ctx context.Context, envID string, puts []*zatter
 		s.log.Info("scheduler reconciled env", "env", envID, "puts", len(puts), "deletes", len(deleteIDs))
 	}
 	return nil
-}
-
-// pickNodes selects n placement targets: ALIVE + schedulable nodes whose labels
-// satisfy the spec's placement_constraints, spread by fewest replicas of this
-// env already on the node. Deterministic tie-break by node id.
-//
-// This is a minimal placement; T-24 replaces it with capacity + region scoring.
-func (s *Scheduler) pickNodes(st *state.Store, env *zatterav1.Environment, n int, exclude map[string]bool) []string {
-	constraints := env.GetService().GetPlacementConstraints()
-
-	type cand struct {
-		id    string
-		count int
-	}
-	envID := env.GetMeta().GetId()
-	counts := map[string]int{}
-	for _, a := range st.ListAssignments(envID) {
-		if a.GetDesired() == zatterav1.AssignmentDesired_ASSIGNMENT_DESIRED_RUN {
-			counts[a.GetNodeId()]++
-		}
-	}
-
-	var cands []cand
-	for _, node := range st.ListNodes() {
-		id := node.GetMeta().GetId()
-		if exclude[id] {
-			continue
-		}
-		if node.GetStatus() != zatterav1.NodeStatus_NODE_STATUS_ALIVE || !node.GetSchedulable() {
-			continue
-		}
-		if !labelsMatch(node.GetLabels(), constraints) {
-			continue
-		}
-		cands = append(cands, cand{id: id, count: counts[id]})
-	}
-	if len(cands) == 0 {
-		return nil
-	}
-
-	var picked []string
-	local := map[string]int{}
-	for i := 0; i < n; i++ {
-		sort.Slice(cands, func(a, b int) bool {
-			ca, cb := cands[a].count+local[cands[a].id], cands[b].count+local[cands[b].id]
-			if ca != cb {
-				return ca < cb
-			}
-			return cands[a].id < cands[b].id
-		})
-		best := cands[0]
-		picked = append(picked, best.id)
-		local[best.id]++
-	}
-	return picked
 }
 
 func (s *Scheduler) apply(ctx context.Context, cmd *clusterv1.Command) error {
