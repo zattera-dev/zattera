@@ -229,6 +229,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 		JoinService:      joinSrv,
 		MeshService:      api.NewMeshServer(st, rs, clk, log),
 		RouteService:     api.NewRouteServer(routeBuilder),
+		DomainService:    api.NewDomainServer(st, rs, clk, cfg.Domain),
 		GitHubWebhook:    api.NewGitHubWebhook(st, rs, sealer, clk, log),
 		UnaryInterceptors: []grpc.UnaryServerInterceptor{
 			forwarder.UnaryInterceptor, authn.UnaryInterceptor, rbac.UnaryInterceptor, auditor.UnaryInterceptor,
