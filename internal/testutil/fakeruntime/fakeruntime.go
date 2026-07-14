@@ -23,6 +23,9 @@ type Hooks struct {
 	// ExitImmediately: containers of this image exit right after start with
 	// the given code.
 	ExitCode func(image string) (code int, exits bool)
+	// Exec, when set, overrides Exec for a running container — e.g. to echo
+	// stdin→stdout or return a specific exit code (T-49).
+	Exec func(id string, spec runtime.ExecSpec, stdin io.Reader, stdout, stderr io.Writer, resize <-chan runtime.TermSize) (int, error)
 }
 
 // Container is the fake's record of one container.
@@ -243,15 +246,19 @@ func (f *Fake) Logs(ctx context.Context, id string, opts runtime.LogsOptions) (<
 	return ch, nil
 }
 
-func (f *Fake) Exec(_ context.Context, id string, spec runtime.ExecSpec, _ io.Reader, stdout, _ io.Writer, _ <-chan runtime.TermSize) (int, error) {
+func (f *Fake) Exec(_ context.Context, id string, spec runtime.ExecSpec, stdin io.Reader, stdout, stderr io.Writer, resize <-chan runtime.TermSize) (int, error) {
 	f.mu.Lock()
 	c, ok := f.containers[id]
+	hook := f.Hooks.Exec
 	f.mu.Unlock()
 	if !ok {
 		return -1, runtime.ErrNotFound
 	}
 	if !c.Running {
 		return -1, fmt.Errorf("fakeruntime: container %s not running", id)
+	}
+	if hook != nil {
+		return hook(id, spec, stdin, stdout, stderr, resize)
 	}
 	if stdout != nil {
 		fmt.Fprintf(stdout, "exec: %s\n", strings.Join(spec.Command, " "))

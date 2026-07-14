@@ -54,6 +54,7 @@ type Options struct {
 	AuditService   zatterav1.AuditServiceServer
 	LogService     zatterav1.LogServiceServer
 	DomainService  zatterav1.DomainServiceServer
+	ExecService    zatterav1.ExecServiceServer
 
 	// Node↔control services (mTLS node identity, no REST gateway).
 	AgentSyncService clusterv1.AgentSyncServiceServer
@@ -240,6 +241,10 @@ func registerGRPC(s *grpc.Server, opts Options) {
 	}
 	if opts.DomainService != nil {
 		zatterav1.RegisterDomainServiceServer(s, opts.DomainService)
+	}
+	// ExecService is gRPC-only (bidi streams; no REST gateway).
+	if opts.ExecService != nil {
+		zatterav1.RegisterExecServiceServer(s, opts.ExecService)
 	}
 	if opts.AgentSyncService != nil {
 		clusterv1.RegisterAgentSyncServiceServer(s, opts.AgentSyncService)

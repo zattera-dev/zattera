@@ -225,6 +225,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 		NodeService:      api.NewNodeServer(st, rs, clk, authority),
 		AuditService:     auditor,
 		LogService:       api.NewLogServer(st, api.GRPCLogDialer{Connect: agentLocalDialUnavailable}, clk, log),
+		ExecService:      api.NewExecServer(st, api.GRPCExecDialer{Connect: agentLocalDialUnavailable}, log),
 		AgentSyncService: syncSrv,
 		JoinService:      joinSrv,
 		MeshService:      api.NewMeshServer(st, rs, clk, log),
