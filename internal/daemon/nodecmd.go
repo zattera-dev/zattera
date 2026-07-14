@@ -220,9 +220,9 @@ func newTeardownCmd() *cobra.Command {
 			}
 			// Best-effort throughout: teardown must make progress even if a step
 			// was already done or the service is unhealthy.
-			_ = run("systemctl", "disable", "--now", "zattera")
+			_ = systemctl("disable", "--now", "zattera")
 			_ = os.Remove(nodeUnitPath)
-			_ = run("systemctl", "daemon-reload")
+			_ = systemctl("daemon-reload")
 			reapManagedDocker()
 			_ = os.RemoveAll("/etc/zattera")
 			if !keepData {
@@ -308,10 +308,10 @@ WantedBy=multi-user.target
 }
 
 func startService() error {
-	if err := run("systemctl", "daemon-reload"); err != nil {
+	if err := systemctl("daemon-reload"); err != nil {
 		return err
 	}
-	return run("systemctl", "enable", "--now", "zattera")
+	return systemctl("enable", "--now", "zattera")
 }
 
 func reapManagedDocker() {
@@ -322,8 +322,8 @@ func reapManagedDocker() {
 	sh(`docker volume rm zt-buildkit-cache 2>/dev/null`)
 }
 
-func run(name string, args ...string) error {
-	c := exec.Command(name, args...)
+func systemctl(args ...string) error {
+	c := exec.Command("systemctl", args...)
 	c.Stdout, c.Stderr = os.Stdout, os.Stderr
 	return c.Run()
 }
@@ -445,13 +445,6 @@ func ask(cmd *cobra.Command, r *bufio.Reader, label, def string) string {
 	line, _ := r.ReadString('\n')
 	if line = strings.TrimSpace(line); line != "" {
 		return line
-	}
-	return def
-}
-
-func orDefault(v, def string) string {
-	if v != "" {
-		return v
 	}
 	return def
 }

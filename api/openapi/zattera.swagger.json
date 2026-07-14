@@ -4555,6 +4555,10 @@
             "type": "object",
             "$ref": "#/definitions/v1ProjectMember"
           }
+        },
+        "clusterDomain": {
+          "type": "string",
+          "description": "Cluster app domain (cfg.domain): apps publish at \u003capp\u003e-\u003cenv\u003e.\u003ccluster_domain\u003e.\nEmpty when the node has no configured domain."
         }
       }
     },

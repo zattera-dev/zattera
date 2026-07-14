@@ -26,11 +26,13 @@ curl -fsSL https://get.zattera.dev | sh
 sudo zattera cluster init          # asks for a domain, prints your login + join commands
 
 # 2. on every other machine, anywhere in the world — join it
-#    (cluster init prints this line for you, address + token filled in)
+#    (previous command prints this line for you, address + token filled in)
 curl -fsSL https://get.zattera.dev | sh && sudo zattera cluster join <control-ip>:8443 --token <JOIN_TOKEN>
 
-# 3. from your laptop — log in and deploy
+# 3. from your laptop — log in
 zt login --server https://<control-ip>:8443 --ca-pin <FINGERPRINT> --token <ADMIN_TOKEN> --context prod
+
+# 4. Enter the directory of your app and run
 zt deploy --prod
 ```
 
