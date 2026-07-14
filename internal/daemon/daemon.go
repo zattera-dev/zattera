@@ -224,6 +224,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 		StateService:     api.NewStateServer(st, rs, clk),
 		NodeService:      api.NewNodeServer(st, rs, clk, authority),
 		AuditService:     auditor,
+		LogService:       api.NewLogServer(st, api.GRPCLogDialer{Connect: agentLocalDialUnavailable}, clk, log),
 		AgentSyncService: syncSrv,
 		JoinService:      joinSrv,
 		MeshService:      api.NewMeshServer(st, rs, clk, log),
@@ -561,4 +562,11 @@ func loadOrCreateNodeID(dataDir string) (string, error) {
 		return "", err
 	}
 	return id, nil
+}
+
+// agentLocalDialUnavailable is a placeholder LogDialer connector: the node-mTLS
+// AgentLocalService listener (:8444) is wired with the build pipeline / exec
+// tasks (T-35/T-49). Until then log fan-out resolves nodes but returns no lines.
+func agentLocalDialUnavailable(context.Context, *zatterav1.Node) (*grpc.ClientConn, error) {
+	return nil, fmt.Errorf("daemon: agent-local service not yet wired")
 }

@@ -52,6 +52,7 @@ type Options struct {
 	NodeService    zatterav1.NodeServiceServer
 	StateService   zatterav1.StateServiceServer
 	AuditService   zatterav1.AuditServiceServer
+	LogService     zatterav1.LogServiceServer
 
 	// Node↔control services (mTLS node identity, no REST gateway).
 	AgentSyncService clusterv1.AgentSyncServiceServer
@@ -232,6 +233,9 @@ func registerGRPC(s *grpc.Server, opts Options) {
 	}
 	if opts.AuditService != nil {
 		zatterav1.RegisterAuditServiceServer(s, opts.AuditService)
+	}
+	if opts.LogService != nil {
+		zatterav1.RegisterLogServiceServer(s, opts.LogService)
 	}
 	if opts.AgentSyncService != nil {
 		clusterv1.RegisterAgentSyncServiceServer(s, opts.AgentSyncService)
