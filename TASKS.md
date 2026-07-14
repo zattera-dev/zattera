@@ -1454,6 +1454,33 @@ source client); in-flight decrement in defer (panics must not leak counters).
 allowlist 403, redirect 308, gzip), websocket echo.
 **Acceptance:** `go test ./internal/daemon/proxy/ -run TestL7`
 
+### T-42-bis — Sticky sessions (cookie affinity)
+Phase 5 · Depends: T-42 · Size: S
+**Files:** `internal/daemon/proxy/sticky.go`, `internal/daemon/proxy/l7.go`
+(extend endpoint selection), `sticky_test.go`
+**Steps:**
+1. When a route's `Middleware.sticky_sessions` is set, pin a client to one
+   endpoint via a cookie (`zt_sticky`): the value is an opaque, stable id per
+   endpoint (`stickyID` = fnv32a hex of the endpoint's assignment id, falling
+   back to its addr). Extract endpoint selection into `L7.selectEndpoint`:
+   - sticky + request carries a `zt_sticky` cookie whose id matches a **healthy**
+     current endpoint → reuse it (no P2C, no new cookie).
+   - otherwise pick via P2C, and (when sticky) return the chosen endpoint's
+     `stickyID` so the handler sets the cookie.
+2. Set `Set-Cookie: zt_sticky=<id>; Path=/; HttpOnly; SameSite=Lax` (and
+   `Secure` when the request arrived over TLS) BEFORE reverse-proxying, only
+   when there is no matching cookie yet (a pinned request re-sends its own).
+**Gotchas:** the sticky target must be re-validated against the CURRENT
+snapshot's endpoints every request — a drained/removed/unhealthy replica falls
+back to P2C and re-pins; never trust the cookie to name an endpoint that is no
+longer in the route; keep the cookie opaque (no raw addr) so it does not leak
+internal topology; non-sticky routes must set no cookie.
+**Tests:** unit — a sticky route pins repeated requests (carrying the returned
+cookie) to the same backend while a non-sticky route spreads; a request whose
+cookie names a now-unhealthy endpoint fails over and re-pins; no `Set-Cookie`
+on non-sticky routes.
+**Acceptance:** `go test ./internal/daemon/proxy/ -run TestSticky`
+
 ### T-43 — L4 TCP proxy
 Phase 5 · Depends: T-39 · Size: M
 **Files:** `internal/daemon/proxy/l4.go`, `l4_test.go`

@@ -81,13 +81,19 @@ func (p *L7) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, int64(mb))
 	}
 
-	ep := p.lb.pick(route.GetEndpoints(), p.rnd)
+	ep, setCookie := p.selectEndpoint(route, r)
 	if ep == nil {
 		if route.GetScaleToZero() && p.Activate != nil {
 			p.Activate(route.GetEnvironmentId())
 		}
 		writeProxyError(w, http.StatusBadGateway, "no healthy endpoint")
 		return
+	}
+	if setCookie != "" {
+		http.SetCookie(w, &http.Cookie{
+			Name: stickyCookie, Value: setCookie, Path: "/",
+			HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: r.TLS != nil,
+		})
 	}
 
 	release := p.lb.acquire(ep.GetAddr())
@@ -113,6 +119,30 @@ func (p *L7) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	rp.ServeHTTP(rw, r)
+}
+
+// selectEndpoint chooses the backend for a request. With sticky sessions, a
+// request carrying a valid affinity cookie reuses its pinned endpoint (when
+// still healthy in the current snapshot); otherwise it picks via P2C and, for a
+// sticky route, returns the cookie value to pin future requests. cookieVal is ""
+// when no Set-Cookie should be written.
+func (p *L7) selectEndpoint(route *clusterv1.HTTPRoute, r *http.Request) (ep *clusterv1.Endpoint, cookieVal string) {
+	sticky := route.GetMiddleware().GetStickySessions()
+	if sticky {
+		if ck, err := r.Cookie(stickyCookie); err == nil {
+			if e := healthyByStickyID(route.GetEndpoints(), ck.Value); e != nil {
+				return e, "" // honor the existing pin; client already has the cookie
+			}
+		}
+	}
+	ep = p.lb.pick(route.GetEndpoints(), p.rnd)
+	if ep == nil {
+		return nil, ""
+	}
+	if sticky {
+		return ep, stickyID(ep) // pin future requests to this endpoint
+	}
+	return ep, ""
 }
 
 // matchHTTP finds the route for a request: exact host (port stripped), then the
