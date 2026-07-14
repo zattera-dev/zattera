@@ -59,6 +59,121 @@ Every alternative makes you choose: a web panel bolted on Docker with no real or
 - **Operate it** — logs, metrics, alerts, jobs & cron, `zattera attach/top/fs/port-forward`, audit log, RBAC, API-first (the CLI is a pure API client).
 - **Coming later** — node autoprovisioning: Zattera buys Hetzner/DO/AWS machines when the pool is full and destroys them when idle, with budget caps.
 
+## What Zattera does
+
+> **Status note:** Pre-alpha. The spec is complete and core foundations exist (Raft, protos, scheduler, mesh, registry), but M1 (deploy → HTTPS → rollback end-to-end) is not finished yet. Most items below are designed/planned, not all shipped today.
+
+### Platform model
+
+- **Single Go binary** — CLI, control plane, worker agent, proxy, and registry in one binary
+- **Docker only** — no Postgres, Redis, etcd, nginx, or certbot on hosts
+- **Embedded Raft state** — no external control-plane database
+- **One-line install & join** — workers join with `--join` + token
+- **Single node → cluster** — fully functional on one machine; grow with `--join`, drain/remove nodes
+
+### Deploy & build
+
+- **Nixpacks + Dockerfile** builds via BuildKit
+- **Pre-built image** deploys
+- **Embedded OCI registry** — no Docker Hub required
+- **Git push-to-deploy** — GitHub webhook/App, branch → environment mapping
+- **Environments** — staging, production, preview-\*
+- **Red/green deploys** — traffic switches only after health checks pass
+- **Instant rollback** — previous release kept warm (~10 min)
+- **Config as code** — `zattera.toml` + CLI/API
+
+### Multi-server orchestration
+
+- **Own scheduler** — bin-packing, spread, node labels/constraints
+- **True multi-server pooling** — not independent per-server management
+- **WireGuard mesh** — cross-region, multi-cloud, NAT/home servers as first-class
+- **HA control plane** — 3–5 node Raft quorum
+- **Node drain/remove** — graceful migration for stateless workloads
+- **Autoscaling** — CPU/RAM/RPS-driven replica scaling
+- **Scale-to-zero** — idle timeout → 0 replicas; wake on request (M3)
+- **Serverless mode** — concurrency-based scaling (M3)
+
+### Networking & traffic
+
+- **Embedded L7/L4 proxy** — HTTP/2, WebSocket, TCP passthrough
+- **Load balancing** — P2C, health checks, optional sticky sessions
+- **TLS / ACME** — embedded Let's Encrypt; HTTP-01 in M1–M3
+- **Internal DNS** — `service.env.project.internal` across nodes over the mesh
+- **Any node as ingress** — traffic can enter anywhere and route over the mesh
+
+### Stateful & data
+
+- **Volumes** — pinned to nodes for Postgres, Redis, etc.
+- **Volume CLI** — browse, cp, snapshot
+- **S3 snapshots** — incremental, content-addressed
+- **Full disaster recovery** — one-command restore: state + volumes + images (M2)
+- **Honest data HA** — snapshots + app-level replication; no fake sync replication
+
+### Operations
+
+- **Logs** — tail, stream, retention; `zattera logs -f`
+- **Metrics** — per-app/node; historical TSDB (M2)
+- **Alerts** — webhook/Slack/email (M3)
+- **Jobs & cron** — one-shot jobs + scheduled cron (M2)
+- **Remote debug** — attach, top, fs, port-forward over API tunnel
+- **RBAC** — org → project → environment roles
+- **Audit log** — mutating API calls recorded
+- **API-first** — CLI is a pure API client; everything scriptable
+- **State export/apply** — GitOps-lite cluster config export
+
+### Coming later
+
+- **SSO/OIDC** (M4)
+- **Wildcard certs via DNS-01** (M4)
+- **Node autoprovisioning** — Hetzner, then DO/AWS (M5)
+- **External log sinks, Prometheus endpoint** (M4)
+
+## What Zattera deliberately doesn't do
+
+Zattera's edge is not a longer feature list — it's focus on the deploy-and-run path and refusing what makes alternatives heavy or fragile.
+
+| Doesn't do                      | Who typically does         | Why Zattera skips it                            |
+| ------------------------------- | -------------------------- | ----------------------------------------------- |
+| Run Kubernetes                  | Kubero, Cozystack, Devtron | No etcd/CNI/CSI/Ingress zoo, no YAML sprawl     |
+| Multi-container pods / sidecars | Kubernetes                 | One container per service instance              |
+| Service mesh / network policies | Istio, Linkerd, K8s        | Complexity far exceeds typical app-deploy needs |
+| Operators / CRDs / plugins      | K8s ecosystem              | No extension sprawl                             |
+| Docker Swarm orchestration      | Dokploy, CapRover          | Weak for cross-region/NAT; maintenance mode     |
+| General-purpose orchestrator    | Nomad, K8s                 | App platform, not a generic scheduler           |
+| Web GUI on servers              | Coolify, Dokploy, CapRover | CLI + API first; no 2GB panel on every host     |
+| 280+ one-click app templates    | Coolify, CapRover          | Maintenance treadmill; docs/recipes instead     |
+| Separate Traefik/Nginx/certbot  | Coolify, Dokploy, CapRover | Proxy + ACME in-process                         |
+| External DB for the platform    | Coolify (Postgres+Redis)   | Control plane shouldn't die when its DB dies    |
+| Distributed volume replication  | Longhorn, Ceph             | Honest RPO via snapshots, not fake HA           |
+| Vendor-hosted builds/images     | Vercel, Railway, Fly       | Builds and images stay on your metal            |
+
+See [What we deliberately don't do](./paas-specification.md#101-what-we-deliberately-dont-do) in the full specification.
+
+## How Zattera compares
+
+| Capability                      | **Zattera**       | **Dokploy**     | **Kubernetes**  | **Coolify**            | **Kamal**          |
+| ------------------------------- | ----------------- | --------------- | --------------- | ---------------------- | ------------------ |
+| Real multi-server scheduling    | ✅ Own scheduler  | ⚠️ Docker Swarm | ✅ Native       | ❌ Independent servers | ⚠️ Manual per-host |
+| NAT / home servers              | ✅ WireGuard mesh | ❌              | ❌              | ❌ SSH-only            | ❌ SSH-only        |
+| Control-plane footprint         | ✅ One binary     | Panel + Swarm   | Full cluster    | ~2GB panel + DB        | Client-only CLI    |
+| Scale-to-zero / serverless      | ✅ (M3)           | ❌              | ⚠️ Via add-ons  | ❌                     | ❌                 |
+| Red/green + instant rollback    | ✅                | Rolling         | Rollouts        | Rolling                | ✅                 |
+| Web admin UI                    | ❌ CLI/API        | ✅              | Many            | ✅                     | ❌                 |
+| One-click app catalog           | ❌                | ✅              | Helm charts     | ✅                     | ❌                 |
+| K8s ecosystem (CRDs, mesh, CSI) | ❌                | ❌              | ✅              | ❌                     | ❌                 |
+| Full DR from S3                 | ✅ (M2)           | Partial         | Velero (add-on) | Partial                | Git config         |
+| Requires K8s expertise          | ❌                | ❌              | ✅              | ❌                     | ❌                 |
+
+**Pick Zattera** if you want Vercel/Heroku-style deploys on your own servers, multi-region/home-lab workers without K8s, and red/green + scale-to-zero + DR as first-class features.
+
+**Pick Dokploy/Coolify** if you want a web UI today, one-click templates, and are fine with a heavier control-plane stack.
+
+**Pick Kubernetes** if you need pods, sidecars, CRDs, service mesh, CSI storage, and have platform-engineering capacity.
+
+**Pick Kamal** if you want minimal explicit deploys to known hosts and will manage scaling and state yourself.
+
+Read the full [comparison](./paas-specification.md#10-comparison--zattera-vs-the-field) in the specification.
+
 ## How it works
 
 ```
