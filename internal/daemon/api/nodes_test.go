@@ -124,12 +124,43 @@ func TestNodesSetLabels(t *testing.T) {
 	}
 }
 
-func TestNodesDrainRemoveStubs(t *testing.T) {
-	ns, _, _ := newNodeServer(t)
-	if _, err := ns.DrainNode(context.Background(), &zatterav1.DrainNodeRequest{NodeId: "x"}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("drain code = %v, want Unimplemented", status.Code(err))
+func TestNodesDrainRemove(t *testing.T) {
+	ns, rs, _ := newNodeServer(t)
+	st := rs.State()
+	ctx := context.Background()
+	st.PutNode(&zatterav1.Node{
+		Meta: &zatterav1.Meta{Id: "w1"}, Name: "worker-1",
+		Roles:  []zatterav1.NodeRole{zatterav1.NodeRole_NODE_ROLE_WORKER},
+		Status: zatterav1.NodeStatus_NODE_STATUS_ALIVE, Schedulable: true,
+	})
+
+	// Drain marks it DRAINING + unschedulable.
+	n, err := ns.DrainNode(ctx, &zatterav1.DrainNodeRequest{NodeId: "w1"})
+	if err != nil {
+		t.Fatalf("drain: %v", err)
 	}
-	if _, err := ns.RemoveNode(context.Background(), &zatterav1.RemoveNodeRequest{NodeId: "x"}); status.Code(err) != codes.Unimplemented {
-		t.Errorf("remove code = %v, want Unimplemented", status.Code(err))
+	if n.GetStatus() != zatterav1.NodeStatus_NODE_STATUS_DRAINING || n.GetSchedulable() {
+		t.Fatalf("drain should set DRAINING + unschedulable, got %+v", n)
+	}
+
+	// Remove refuses until DRAINED (no force).
+	if _, err := ns.RemoveNode(ctx, &zatterav1.RemoveNodeRequest{NodeId: "w1"}); status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("remove of non-drained node should be FailedPrecondition, got %v", err)
+	}
+
+	// Once DRAINED, remove deletes the node.
+	drained, _ := st.Node("w1")
+	drained.Status = zatterav1.NodeStatus_NODE_STATUS_DRAINED
+	st.PutNode(drained)
+	if _, err := ns.RemoveNode(ctx, &zatterav1.RemoveNodeRequest{NodeId: "w1"}); err != nil {
+		t.Fatalf("remove drained node: %v", err)
+	}
+	if _, ok := st.Node("w1"); ok {
+		t.Fatal("node should be deleted after remove")
+	}
+
+	// Unknown node.
+	if _, err := ns.DrainNode(ctx, &zatterav1.DrainNodeRequest{NodeId: "ghost"}); status.Code(err) != codes.NotFound {
+		t.Fatalf("drain of unknown node should be NotFound, got %v", err)
 	}
 }

@@ -104,14 +104,79 @@ func (s *NodeServer) SetNodeLabels(ctx context.Context, req *zatterav1.SetNodeLa
 	return n, nil
 }
 
-// DrainNode is implemented in T-30.
-func (s *NodeServer) DrainNode(_ context.Context, _ *zatterav1.DrainNodeRequest) (*zatterav1.Node, error) {
-	return nil, status.Error(codes.Unimplemented, "node drain lands in T-30")
+// DrainNode marks a node DRAINING and unschedulable; the scheduler then
+// migrates its instances away and marks it DRAINED (T-29).
+func (s *NodeServer) DrainNode(ctx context.Context, req *zatterav1.DrainNodeRequest) (*zatterav1.Node, error) {
+	if _, ok := s.store.Node(req.GetNodeId()); !ok {
+		return nil, status.Error(codes.NotFound, "node not found")
+	}
+	if err := s.apply(ctx, &clusterv1.Command{Mutation: &clusterv1.Command_SetNodeStatus{SetNodeStatus: &clusterv1.SetNodeStatus{
+		NodeId:         req.GetNodeId(),
+		Status:         zatterav1.NodeStatus_NODE_STATUS_DRAINING,
+		SchedulableSet: true,
+		Schedulable:    false,
+	}}}); err != nil {
+		return nil, toStatus(err)
+	}
+	n, _ := s.store.Node(req.GetNodeId())
+	return n, nil
 }
 
-// RemoveNode is implemented in T-30.
-func (s *NodeServer) RemoveNode(_ context.Context, _ *zatterav1.RemoveNodeRequest) (*emptypb.Empty, error) {
-	return nil, status.Error(codes.Unimplemented, "node removal lands in T-30")
+// RemoveNode deletes a drained node (or any node with force), reaping its
+// assignments and, for a control node, removing it from the raft cluster. It
+// refuses to remove the last control node without force.
+func (s *NodeServer) RemoveNode(ctx context.Context, req *zatterav1.RemoveNodeRequest) (*emptypb.Empty, error) {
+	n, ok := s.store.Node(req.GetNodeId())
+	if !ok {
+		return nil, status.Error(codes.NotFound, "node not found")
+	}
+	if !req.GetForce() && n.GetStatus() != zatterav1.NodeStatus_NODE_STATUS_DRAINED {
+		return nil, status.Error(codes.FailedPrecondition, "node is not drained; drain it first or pass force")
+	}
+	isControl := false
+	for _, r := range n.GetRoles() {
+		if r == zatterav1.NodeRole_NODE_ROLE_CONTROL {
+			isControl = true
+		}
+	}
+	if isControl && !req.GetForce() && s.controlNodeCount() <= 1 {
+		return nil, status.Error(codes.FailedPrecondition, "refusing to remove the last control node without force")
+	}
+
+	// Reap the node's assignments so the scheduler re-places their replicas.
+	var reap []string
+	for _, a := range s.store.ListAssignmentsByNode(req.GetNodeId()) {
+		reap = append(reap, a.GetMeta().GetId())
+	}
+	if len(reap) > 0 {
+		if err := s.apply(ctx, &clusterv1.Command{Mutation: &clusterv1.Command_DeleteAssignments{DeleteAssignments: &clusterv1.DeleteAssignments{AssignmentIds: reap}}}); err != nil {
+			return nil, toStatus(err)
+		}
+	}
+	if err := s.apply(ctx, &clusterv1.Command{Mutation: &clusterv1.Command_DeleteNode{DeleteNode: &clusterv1.DeleteByID{Id: req.GetNodeId()}}}); err != nil {
+		return nil, toStatus(err)
+	}
+	if isControl {
+		// Best-effort raft membership removal (only *raftstore.Store implements
+		// it; a nil/forwarding Applier simply skips).
+		if m, ok := s.raft.(interface{ RemoveServer(string) error }); ok {
+			_ = m.RemoveServer(req.GetNodeId())
+		}
+	}
+	return &emptypb.Empty{}, nil
+}
+
+// controlNodeCount counts registered control nodes.
+func (s *NodeServer) controlNodeCount() int {
+	n := 0
+	for _, node := range s.store.ListNodes() {
+		for _, r := range node.GetRoles() {
+			if r == zatterav1.NodeRole_NODE_ROLE_CONTROL {
+				n++
+			}
+		}
+	}
+	return n
 }
 
 // caHashHex is the hex SHA-256 over the CA certificate DER bytes.

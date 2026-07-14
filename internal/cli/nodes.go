@@ -1,12 +1,16 @@
 package cli
 
 import (
+	"context"
+	"fmt"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	zatterav1 "github.com/zattera-dev/zattera/api/gen/zattera/v1"
+	"github.com/zattera-dev/zattera/pkg/apiclient"
 )
 
 func newNodesCmd() *cobra.Command {
@@ -15,8 +19,95 @@ func newNodesCmd() *cobra.Command {
 		Aliases: []string{"node"},
 		Short:   "Inspect cluster nodes and manage join tokens",
 	}
-	cmd.AddCommand(newNodesLsCmd(), newJoinTokenCmd())
+	cmd.AddCommand(newNodesLsCmd(), newJoinTokenCmd(), newNodesDrainCmd(), newNodesRmCmd())
 	return cmd
+}
+
+func newNodesDrainCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "drain <name>",
+		Short: "Drain a node (migrate instances away, then mark it DRAINED)",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, _, err := clientFromContext()
+			if err != nil {
+				return err
+			}
+			defer func() { _ = client.Close() }()
+			ctx, cancel := context.WithTimeout(cmd.Context(), 10*time.Minute)
+			defer cancel()
+
+			id, err := resolveNodeID(ctx, client, args[0])
+			if err != nil {
+				return err
+			}
+			if _, err := client.Nodes.DrainNode(ctx, &zatterav1.DrainNodeRequest{NodeId: id}); err != nil {
+				return apiError(err)
+			}
+			p := printerFor(cmd)
+			p.Infof("draining %s...", args[0])
+			for {
+				n, err := client.Nodes.GetNode(ctx, &zatterav1.GetNodeRequest{NodeId: id})
+				if err != nil {
+					return apiError(err)
+				}
+				if n.GetStatus() == zatterav1.NodeStatus_NODE_STATUS_DRAINED {
+					p.Successf("node %s drained", args[0])
+					return nil
+				}
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(2 * time.Second):
+				}
+			}
+		},
+	}
+}
+
+func newNodesRmCmd() *cobra.Command {
+	var force bool
+	cmd := &cobra.Command{
+		Use:     "rm <name>",
+		Aliases: []string{"remove"},
+		Short:   "Remove a drained node from the cluster",
+		Args:    cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, _, err := clientFromContext()
+			if err != nil {
+				return err
+			}
+			defer func() { _ = client.Close() }()
+			ctx, cancel := cmdContext(cmd)
+			defer cancel()
+
+			id, err := resolveNodeID(ctx, client, args[0])
+			if err != nil {
+				return err
+			}
+			if _, err := client.Nodes.RemoveNode(ctx, &zatterav1.RemoveNodeRequest{NodeId: id, Force: force}); err != nil {
+				return apiError(err)
+			}
+			printerFor(cmd).Successf("node %s removed", args[0])
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&force, "force", false, "remove even if not drained")
+	return cmd
+}
+
+// resolveNodeID maps a node name to its id.
+func resolveNodeID(ctx context.Context, client *apiclient.Client, name string) (string, error) {
+	resp, err := client.Nodes.ListNodes(ctx, &emptypb.Empty{})
+	if err != nil {
+		return "", apiError(err)
+	}
+	for _, n := range resp.GetNodes() {
+		if n.GetName() == name || n.GetMeta().GetId() == name {
+			return n.GetMeta().GetId(), nil
+		}
+	}
+	return "", fmt.Errorf("node %q not found", name)
 }
 
 func newNodesLsCmd() *cobra.Command {

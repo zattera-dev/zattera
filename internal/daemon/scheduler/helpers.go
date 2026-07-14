@@ -46,6 +46,12 @@ func nodeDown(st *state.Store, nodeID string) bool {
 	return !ok || n.GetStatus() != zatterav1.NodeStatus_NODE_STATUS_ALIVE
 }
 
+// nodeDraining reports whether a node is being drained.
+func nodeDraining(st *state.Store, nodeID string) bool {
+	n, ok := st.Node(nodeID)
+	return ok && n.GetStatus() == zatterav1.NodeStatus_NODE_STATUS_DRAINING
+}
+
 func isStopped(a *zatterav1.Assignment) bool {
 	return a.GetObserved().GetState() == zatterav1.InstanceState_INSTANCE_STATE_STOPPED
 }

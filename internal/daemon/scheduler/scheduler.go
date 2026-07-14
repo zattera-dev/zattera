@@ -106,7 +106,11 @@ func (s *Scheduler) evaluate(ctx context.Context) error {
 	}
 	// Reap assignments whose env/release was deleted (T-27); these no longer
 	// belong to any environment the loop above visits.
-	return s.reconcileOrphans(ctx, st)
+	if err := s.reconcileOrphans(ctx, st); err != nil {
+		return err
+	}
+	// Migrate/stop instances off DRAINING nodes and mark them DRAINED (T-29).
+	return s.reconcileDrains(ctx, st)
 }
 
 // evaluateEnv converges one environment's active-release replica count.
@@ -152,13 +156,19 @@ func (s *Scheduler) evaluateEnv(ctx context.Context, st *state.Store, env *zatte
 			continue
 		}
 		if nodeDown(st, a.GetNodeId()) {
+			if nodeDraining(st, a.GetNodeId()) {
+				// Draining node: the replica is not counted as "good" (so a
+				// replacement is placed on a live node), but it is left running
+				// — reconcileDrains stops it once the replacement is healthy.
+				continue
+			}
 			if isStateful(rel) {
-				// Stateful: leave in place; the volume is pinned to the down
-				// node. TODO(T-62): mark the volume NODE_LOST and surface it.
+				// Hard down + stateful: leave in place; the volume is pinned to
+				// the down node. TODO(T-62): mark the volume NODE_LOST.
 				good = append(good, a)
 				continue
 			}
-			// Stateless: drop it so placement replaces it elsewhere.
+			// Hard down + stateless: drop it so placement replaces it elsewhere.
 			deleteIDs = append(deleteIDs, a.GetMeta().GetId())
 			continue
 		}

@@ -89,6 +89,10 @@ func (m *LivenessMonitor) evaluate(ctx context.Context) {
 		if id == m.localNodeID {
 			continue // never mark ourselves down
 		}
+		// DRAINING/DRAINED are admin-controlled; liveness must not revert them.
+		if st := n.GetStatus(); st == zatterav1.NodeStatus_NODE_STATUS_DRAINING || st == zatterav1.NodeStatus_NODE_STATUS_DRAINED {
+			continue
+		}
 		ns, ok := m.live.Get(id)
 		fresh := ok && !ns.LastHeartbeat.IsZero() && now.Sub(ns.LastHeartbeat) <= heartbeatDeadline
 
