@@ -285,6 +285,11 @@ func uploadSource(ctx context.Context, client *apiclient.Client, proj, app, envI
 		n, rerr := pr.Read(buf)
 		if n > 0 {
 			if serr := stream.Send(&zatterav1.UploadSourceChunk{Data: buf[:n]}); serr != nil {
+				// Send returns io.EOF once the server has returned (usually an
+				// error); the real status is on CloseAndRecv. Surface it.
+				if _, cerr := stream.CloseAndRecv(); cerr != nil {
+					return nil, apiError(cerr)
+				}
 				return nil, apiError(serr)
 			}
 		}

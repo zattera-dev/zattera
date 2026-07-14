@@ -37,6 +37,7 @@ import (
 	"github.com/zattera-dev/zattera/internal/daemon/builder"
 	"github.com/zattera-dev/zattera/internal/daemon/ca"
 	"github.com/zattera-dev/zattera/internal/daemon/livestate"
+	"github.com/zattera-dev/zattera/internal/daemon/logstore"
 	"github.com/zattera-dev/zattera/internal/daemon/nodeinfo"
 	"github.com/zattera-dev/zattera/internal/daemon/raftstore"
 	crt "github.com/zattera-dev/zattera/internal/daemon/runtime"
@@ -373,11 +374,21 @@ func Run(ctx context.Context, cfg config.Config) error {
 			}
 		}()
 
-		// Agent-local service (T-54): serve build/exec/port-forward on :8444 with
-		// node mTLS so the control plane can dispatch builds and interactive
-		// sessions to this node. Needs a container runtime.
+		// Agent-local service (T-54): serve build/exec/port-forward/logs on :8444
+		// with node mTLS so the control plane can dispatch builds, interactive
+		// sessions and log queries to this node. Needs a container runtime.
 		if rt != nil {
-			if err := startAgentLocalServer(ctx, authority, cfg, nodeID, rt, clk, log); err != nil {
+			// Per-node log capture: follow container logs into the logstore and
+			// serve them via AgentLocalService.QueryLogs.
+			var logSrv *agent.LogServer
+			if store, err := logstore.New(logstore.Options{Root: filepath.Join(cfg.DataDir, "logs"), Clock: clk}); err != nil {
+				log.Warn("logstore init failed; logs unavailable", "err", err)
+			} else {
+				capture := agent.NewLogCapture(rt, store, log)
+				go capture.Run(ctx)
+				logSrv = agent.NewLogServer(store, na.Executor().MatchingStreams)
+			}
+			if err := startAgentLocalServer(ctx, authority, cfg, nodeID, rt, clk, logSrv, log); err != nil {
 				log.Warn("agent-local service failed to start", "err", err)
 			}
 		}
@@ -681,7 +692,7 @@ func newAgentLocalConnect(authority *ca.CA, nodeID string, _ *slog.Logger) func(
 // mTLS) serving builds + exec/top/port-forward. The build sub-server needs a
 // container runtime + a source fetcher that pulls tarballs from the control
 // blob endpoint over the same node identity.
-func startAgentLocalServer(ctx context.Context, authority *ca.CA, cfg config.Config, nodeID string, rt crt.ContainerRuntime, clk clock.Clock, log *slog.Logger) error {
+func startAgentLocalServer(ctx context.Context, authority *ca.CA, cfg config.Config, nodeID string, rt crt.ContainerRuntime, clk clock.Clock, logSrv *agent.LogServer, log *slog.Logger) error {
 	tlsCfg := nodeClientTLS(authority, nodeID, "127.0.0.1")
 	fetch := agent.HTTPSourceFetcher{Client: &http.Client{
 		Timeout:   10 * time.Minute,
@@ -698,7 +709,7 @@ func startAgentLocalServer(ctx context.Context, authority *ca.CA, cfg config.Con
 		Logger:           log,
 	})
 	execSrv := agent.NewExecServer(rt, log)
-	local := agent.NewLocalServer(buildSrv, execSrv)
+	local := agent.NewLocalServer(buildSrv, execSrv, logSrv)
 
 	serverTLS, err := authority.ServerTLSConfig([]string{"localhost"}, agentLocalIPs(cfg))
 	if err != nil {

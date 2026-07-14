@@ -14,6 +14,7 @@ import (
 
 	clusterv1 "github.com/zattera-dev/zattera/api/gen/zattera/cluster/v1"
 	zatterav1 "github.com/zattera-dev/zattera/api/gen/zattera/v1"
+	"github.com/zattera-dev/zattera/internal/daemon/logstore"
 	"github.com/zattera-dev/zattera/internal/daemon/runtime"
 	"github.com/zattera-dev/zattera/internal/pkgutil/clock"
 )
@@ -147,6 +148,31 @@ func (e *Executor) current() *clusterv1.AssignmentSet {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return e.latest
+}
+
+// MatchingStreams returns the assignment ids on this node whose metadata match
+// the log selector (used by the agent log query server, T-54).
+func (e *Executor) MatchingStreams(sel *zatterav1.LogSelector) []logstore.StreamID {
+	var out []logstore.StreamID
+	for _, a := range e.current().GetAssignments() {
+		if sel.GetInstanceId() != "" && a.GetMeta().GetId() != sel.GetInstanceId() {
+			continue
+		}
+		if sel.GetProjectId() != "" && a.GetProjectId() != sel.GetProjectId() {
+			continue
+		}
+		if sel.GetAppId() != "" && a.GetAppId() != sel.GetAppId() {
+			continue
+		}
+		if sel.GetEnvironmentId() != "" && a.GetEnvironmentId() != sel.GetEnvironmentId() {
+			continue
+		}
+		if sel.GetJobId() != "" && a.GetJobId() != sel.GetJobId() {
+			continue
+		}
+		out = append(out, logstore.StreamID(a.GetMeta().GetId()))
+	}
+	return out
 }
 
 // reconcile converges the runtime to set: it removes containers whose

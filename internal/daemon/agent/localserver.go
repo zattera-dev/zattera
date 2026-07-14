@@ -6,6 +6,7 @@ import (
 	"google.golang.org/grpc"
 
 	clusterv1 "github.com/zattera-dev/zattera/api/gen/zattera/cluster/v1"
+	zatterav1 "github.com/zattera-dev/zattera/api/gen/zattera/v1"
 )
 
 // LocalServer composes the node-local AgentLocalService methods that the control
@@ -19,13 +20,22 @@ type LocalServer struct {
 	clusterv1.UnimplementedAgentLocalServiceServer
 	build *BuildServer
 	exec  *ExecServer
+	logs  *LogServer
 }
 
-// NewLocalServer builds the composite. Either sub-server may be nil (e.g. a
+// NewLocalServer builds the composite. Any sub-server may be nil (e.g. a
 // non-builder node passes build=nil); the corresponding methods then report
 // Unimplemented via the embedded base.
-func NewLocalServer(build *BuildServer, exec *ExecServer) *LocalServer {
-	return &LocalServer{build: build, exec: exec}
+func NewLocalServer(build *BuildServer, exec *ExecServer, logs *LogServer) *LocalServer {
+	return &LocalServer{build: build, exec: exec, logs: logs}
+}
+
+// QueryLogs dispatches to the log sub-server.
+func (s *LocalServer) QueryLogs(q *zatterav1.LogQuery, stream grpc.ServerStreamingServer[zatterav1.LogLine]) error {
+	if s.logs == nil {
+		return s.UnimplementedAgentLocalServiceServer.QueryLogs(q, stream)
+	}
+	return s.logs.QueryLogs(q, stream)
 }
 
 // RunBuild dispatches to the build sub-server.

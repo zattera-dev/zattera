@@ -135,6 +135,10 @@ func New(cfg Config) *Agent {
 	return a
 }
 
+// Executor returns the node's executor (nil when the agent runs without a
+// container runtime), exposing its assignment view for log stream resolution.
+func (a *Agent) Executor() *Executor { return a.executor }
+
 // reportStatus enqueues an executor status batch for the sync stream. It never
 // blocks: if the buffer is full (long disconnect) the oldest is dropped —
 // control re-derives truth from the next full reconcile.

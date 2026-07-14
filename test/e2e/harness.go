@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -195,12 +196,19 @@ func (h *harness) mustCLI(args ...string) string {
 	return out
 }
 
-// httpClient returns a client that trusts the dev CA (for the HTTPS ingress).
+// httpClient returns a client that trusts the dev CA and routes every
+// connection to loopback, so requests can use the real app hostname (correct
+// SNI + certificate validation) while reaching the local ingress.
 func (h *harness) httpClient() *http.Client {
+	dialer := &net.Dialer{Timeout: 4 * time.Second}
 	return &http.Client{
 		Timeout: 5 * time.Second,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{RootCAs: h.caPool},
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				_, port, _ := net.SplitHostPort(addr)
+				return dialer.DialContext(ctx, network, net.JoinHostPort("127.0.0.1", port))
+			},
 		},
 	}
 }

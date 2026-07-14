@@ -47,11 +47,12 @@ func TestSmoke(t *testing.T) {
 	}
 
 	host := "hello-production." + h.domain
-	httpURL := "http://127.0.0.1" + portOf(h.banner["ingress_http"]) + "/"
-	httpsURL := "https://127.0.0.1" + portOf(h.banner["ingress_https"]) + "/"
+	httpURL := "http://" + host + portOf(h.banner["ingress_http"]) + "/"
+	httpsURL := "https://" + host + portOf(h.banner["ingress_https"]) + "/"
 
 	// Step 3: the app serves the fixture body over the HTTP ingress (Host routing)
-	// and over HTTPS on the dev port with the dev CA. First build is slow.
+	// and over HTTPS on the dev port with the dev CA. The client routes to
+	// loopback but keeps the hostname for SNI/cert. First build is slow.
 	h.pollBody(httpURL, host, "Hello from Zattera fixture", 180*time.Second)
 	h.pollBody(httpsURL, host, "Hello from Zattera fixture", 60*time.Second)
 
