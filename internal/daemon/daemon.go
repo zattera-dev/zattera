@@ -8,6 +8,7 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -68,6 +69,7 @@ func Commands() []*cobra.Command {
 				cfg.Dev = true
 				cfg.Mesh.Disabled = true
 				cfg.ACME.Disabled = true
+				applyDevDefaults(&cfg)
 			}
 			if joinTo != "" {
 				cfg.Join.Addr = joinTo
@@ -147,11 +149,20 @@ func Run(ctx context.Context, cfg config.Config) error {
 	// (the org entry) before the idempotency check — otherwise a restart would
 	// reprint the token.
 	var sealer secrets.Sealer
+	var bootToken, bootPassphrase string
 	if rs.IsLeader() {
 		if err := rs.Barrier(ctx); err != nil {
 			return err
 		}
-		keyring, err := Bootstrap(ctx, rs, BootstrapOptions{Logger: log})
+		// In dev mode capture the one-time secrets so the startup banner shows
+		// them (instead of Bootstrap's own stdout lines); otherwise Bootstrap
+		// prints to stdout as usual.
+		bootOpts := BootstrapOptions{Logger: log}
+		var bootOut bytes.Buffer
+		if cfg.Dev {
+			bootOpts.Out = &bootOut
+		}
+		keyring, err := Bootstrap(ctx, rs, bootOpts)
 		if err != nil {
 			return err
 		}
@@ -160,8 +171,17 @@ func Run(ctx context.Context, cfg config.Config) error {
 				return err
 			}
 		}
+		bootToken, bootPassphrase = bootstrapSecrets(bootOut.String())
 	}
 	// TODO(T-3x): unseal-on-restart so followers/restarts recover the sealer.
+
+	// Dev-mode startup banner (T-52): print effective URLs + first-boot secrets
+	// as a friendly block plus DEVBANNER: machine-readable lines (T-54 parses).
+	if cfg.Dev {
+		info := newDevBannerInfo(cfg)
+		info.AdminToken, info.RecoveryPassphrase = bootToken, bootPassphrase
+		renderDevBanner(os.Stdout, info)
+	}
 
 	// Register this node in state (T-12): capacity, roles, os/arch. Leader only
 	// for now; joining nodes are registered by the join flow (T-17).
