@@ -19,6 +19,7 @@ require (
 	github.com/tonistiigi/fsutil v0.0.0-20241121093142-31cf1f437184
 	go.etcd.io/bbolt v1.5.0
 	golang.org/x/crypto v0.54.0
+	golang.org/x/net v0.56.0
 	golang.zx2c4.com/wireguard v0.0.0-20260522210424-ecfc5a8d5446
 	golang.zx2c4.com/wireguard/wgctrl v0.0.0-20241231184526-a9ab2273dd10
 	google.golang.org/genproto/googleapis/api v0.0.0-20260706201446-f0a921348800
@@ -117,7 +118,6 @@ require (
 	go.opentelemetry.io/otel/sdk v1.44.0 // indirect
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
-	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
