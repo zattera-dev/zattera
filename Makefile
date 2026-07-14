@@ -60,11 +60,11 @@ lint: proto-lint ## Lint Go + protos
 
 .PHONY: test
 test: ## Unit tests (no Docker; includes simcluster)
-	go test -race ./...
+	CGO_ENABLED=1 go test -race ./...
 
 .PHONY: test-integration
 test-integration: ## Integration tests (require a running Docker daemon)
-	go test -race -tags integration -count=1 -timeout 20m ./test/integration/...
+	CGO_ENABLED=1 go test -race -tags integration -count=1 -timeout 20m ./test/integration/...
 
 .PHONY: test-e2e
 test-e2e: build ## Full single-node E2E smoke test (requires Docker)
