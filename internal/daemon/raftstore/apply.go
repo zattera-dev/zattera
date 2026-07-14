@@ -50,6 +50,8 @@ func (f *FSM) apply(cmd *clusterv1.Command) error {
 	// --- releases / deployments / builds ---
 	case *clusterv1.Command_PutRelease:
 		s.PutRelease(m.PutRelease.GetRelease())
+	case *clusterv1.Command_DeleteRelease:
+		s.DeleteRelease(m.DeleteRelease.GetId())
 	case *clusterv1.Command_PutDeployment:
 		s.PutDeployment(m.PutDeployment.GetDeployment())
 	case *clusterv1.Command_SetDeploymentPhase:

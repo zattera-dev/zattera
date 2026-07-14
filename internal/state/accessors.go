@@ -360,6 +360,14 @@ func (s *Store) Release(id string) (*zatterav1.Release, bool) {
 	return clone(r), true
 }
 
+// DeleteRelease removes a release (retention GC, T-38).
+func (s *Store) DeleteRelease(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.releases, id)
+	s.touch(KindRelease, id)
+}
+
 // ListReleases returns an environment's releases sorted by version descending.
 func (s *Store) ListReleases(envID string) []*zatterav1.Release {
 	s.mu.RLock()

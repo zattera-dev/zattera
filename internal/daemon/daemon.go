@@ -236,8 +236,11 @@ func Run(ctx context.Context, cfg config.Config) error {
 
 	// Embedded registry (T-32): control nodes host image blobs on :5000, TLS
 	// with the CA server cert, authenticated by node creds and user PATs.
-	if _, err := startRegistry(ctx, cfg, st, authority, clk, log); err != nil {
+	var retentionSweeper scheduler.RegistrySweeper
+	if reg, err := startRegistry(ctx, cfg, st, authority, clk, log); err != nil {
 		log.Warn("registry start failed; continuing without it", "err", err)
+	} else if reg != nil {
+		retentionSweeper = reg.Manifests // prune images for GC'd releases (T-38)
 	}
 
 	// Node liveness (T-21): the leader turns livestate heartbeats into durable
@@ -251,6 +254,11 @@ func Run(ctx context.Context, cfg config.Config) error {
 	// Deployment orchestrator (T-26): the leader drives red/green deployments
 	// through their phases. Leader-gated internally.
 	go scheduler.NewOrchestrator(rs, clk, log).Run(ctx)
+
+	// Release retention (T-38): the leader prunes old releases + their registry
+	// images and stale source tarballs. The registry sweeper is wired when this
+	// control node hosts a local registry.
+	go scheduler.NewRetention(rs, clk, retentionSweeper, filepath.Join(cfg.DataDir, "uploads"), log).Run(ctx)
 
 	// Mesh (T-19): on a mesh-enabled control node, bring WireGuard up as the hub
 	// and keep its own peer set in sync. Single-node/dev disables the mesh.
