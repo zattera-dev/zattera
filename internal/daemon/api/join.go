@@ -72,10 +72,20 @@ func (s *JoinServer) Join(ctx context.Context, req *clusterv1.JoinRequest) (*clu
 		return nil, status.Error(codes.PermissionDenied, "join token could not be consumed (already used?)")
 	}
 
-	nodeID := ids.New()
 	roles := tok.GetRoles()
 	if len(roles) == 0 {
 		roles = []zatterav1.NodeRole{zatterav1.NodeRole_NODE_ROLE_WORKER}
+	}
+
+	// A restarting node re-enrolls under its existing id: resume that record
+	// (keeping its mesh IP and roles) instead of registering a duplicate.
+	nodeID := ids.New()
+	if reqID := req.GetExistingNodeId(); reqID != "" {
+		if existing, ok := s.store.Node(reqID); ok {
+			nodeID = reqID
+			roles = existing.GetRoles()
+			s.log.Info("node re-joining under existing identity", "node", nodeID)
+		}
 	}
 
 	meshIP, err := s.registerNode(ctx, nodeID, roles, req)
@@ -159,6 +169,16 @@ func (s *JoinServer) registerNode(ctx context.Context, nodeID string, roles []za
 	isControl := hasControlRole(roles)
 	now := timestamppb.New(s.clock.Now())
 
+	// Resume: a returning node keeps its existing mesh IP and creation time; no
+	// new allocation, no duplicate record.
+	if existing, ok := s.store.Node(nodeID); ok {
+		node := nodeRecord(nodeID, roles, req, labels, existing.GetMeshIp(), existing.GetMeta().GetCreatedAt(), now)
+		if err := s.apply(ctx, &clusterv1.Command{Mutation: &clusterv1.Command_PutNode{PutNode: &clusterv1.PutNode{Node: node}}}); err != nil {
+			return "", toStatus(err)
+		}
+		return existing.GetMeshIp(), nil
+	}
+
 	for attempt := 0; attempt < meshIPRetries; attempt++ {
 		meshIP := ""
 		if s.cfg.MeshEnabled {
@@ -168,21 +188,7 @@ func (s *JoinServer) registerNode(ctx context.Context, nodeID string, roles []za
 			}
 			meshIP = ip
 		}
-		node := &zatterav1.Node{
-			Meta:               &zatterav1.Meta{Id: nodeID, CreatedAt: now, UpdatedAt: now},
-			Name:               req.GetNodeName(),
-			Roles:              roles,
-			Labels:             labels,
-			MeshIp:             meshIP,
-			WireguardPublicKey: req.GetWireguardPublicKey(),
-			PublicEndpoints:    req.GetPublicEndpoints(),
-			Capacity:           req.GetCapacity(),
-			CapacityDiskMb:     req.GetCapacityDiskMb(),
-			Status:             zatterav1.NodeStatus_NODE_STATUS_ALIVE,
-			Schedulable:        true,
-			BinaryVersion:      req.GetBinaryVersion(),
-			OsArch:             req.GetOsArch(),
-		}
+		node := nodeRecord(nodeID, roles, req, labels, meshIP, now, now)
 		if err := s.apply(ctx, &clusterv1.Command{Mutation: &clusterv1.Command_PutNode{PutNode: &clusterv1.PutNode{Node: node}}}); err != nil {
 			return "", toStatus(err)
 		}
@@ -193,6 +199,25 @@ func (s *JoinServer) registerNode(ctx context.Context, nodeID string, roles []za
 		s.log.Warn("mesh ip collision on join; retrying", "node", nodeID, "mesh_ip", meshIP)
 	}
 	return "", status.Error(codes.Aborted, "could not allocate a unique mesh IP; retry")
+}
+
+// nodeRecord builds the node state entry for a (re)joining node.
+func nodeRecord(nodeID string, roles []zatterav1.NodeRole, req *clusterv1.JoinRequest, labels map[string]string, meshIP string, createdAt, updatedAt *timestamppb.Timestamp) *zatterav1.Node {
+	return &zatterav1.Node{
+		Meta:               &zatterav1.Meta{Id: nodeID, CreatedAt: createdAt, UpdatedAt: updatedAt},
+		Name:               req.GetNodeName(),
+		Roles:              roles,
+		Labels:             labels,
+		MeshIp:             meshIP,
+		WireguardPublicKey: req.GetWireguardPublicKey(),
+		PublicEndpoints:    req.GetPublicEndpoints(),
+		Capacity:           req.GetCapacity(),
+		CapacityDiskMb:     req.GetCapacityDiskMb(),
+		Status:             zatterav1.NodeStatus_NODE_STATUS_ALIVE,
+		Schedulable:        true,
+		BinaryVersion:      req.GetBinaryVersion(),
+		OsArch:             req.GetOsArch(),
+	}
 }
 
 // buildInitialPeers returns the control-node peers a joining worker should dial

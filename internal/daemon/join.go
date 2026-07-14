@@ -92,6 +92,7 @@ func runJoin(ctx context.Context, cfg config.Config, log *slog.Logger) (*joinRes
 	resp, err := clusterv1.NewJoinServiceClient(conn).Join(ctx, &clusterv1.JoinRequest{
 		TokenSecret:         secret,
 		NodeName:            cfg.NodeName,
+		ExistingNodeId:      readNodeID(cfg.DataDir),
 		CsrPem:              csrPEM,
 		OsArch:              runtime.GOOS + "/" + runtime.GOARCH,
 		BinaryVersion:       version.Version,
@@ -194,6 +195,17 @@ func marshalECKey(key *ecdsa.PrivateKey) ([]byte, error) {
 }
 
 // persistJoin writes the node identity + cluster facts under <data-dir>/node/.
+// readNodeID returns this node's id from a prior join (<data-dir>/node/id), or
+// "" if it has not joined before. A restarting node sends it so the control
+// plane resumes its record instead of registering a duplicate.
+func readNodeID(dataDir string) string {
+	b, err := os.ReadFile(filepath.Join(dataDir, "node", "id"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}
+
 func persistJoin(dataDir string, r *joinResult) error {
 	dir := filepath.Join(dataDir, "node")
 	if err := os.MkdirAll(dir, 0o700); err != nil {

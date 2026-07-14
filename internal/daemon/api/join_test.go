@@ -59,6 +59,55 @@ func TestJoin(t *testing.T) {
 		}
 	})
 
+	t.Run("re-join with existing id resumes the node, no duplicate", func(t *testing.T) {
+		h := newJoinHarness(t, true)
+		secret := h.mintToken(t, false, 0, zatterav1.NodeRole_NODE_ROLE_WORKER)
+
+		csr1, _ := genCSR(t)
+		first, err := h.srv.Join(context.Background(), &clusterv1.JoinRequest{
+			TokenSecret: secret, NodeName: "luigi", CsrPem: csr1, OsArch: "linux/amd64",
+		})
+		if err != nil {
+			t.Fatalf("first join: %v", err)
+		}
+		id, meshIP := first.GetNodeId(), first.GetMeshIp()
+		before := len(h.rs.State().ListNodes())
+
+		// Restart: re-enroll under the same id with a fresh CSR.
+		csr2, _ := genCSR(t)
+		second, err := h.srv.Join(context.Background(), &clusterv1.JoinRequest{
+			TokenSecret: secret, NodeName: "luigi", ExistingNodeId: id, CsrPem: csr2, OsArch: "linux/amd64",
+		})
+		if err != nil {
+			t.Fatalf("re-join: %v", err)
+		}
+		if second.GetNodeId() != id {
+			t.Fatalf("re-join minted a new id %q, want %q", second.GetNodeId(), id)
+		}
+		if second.GetMeshIp() != meshIP {
+			t.Fatalf("re-join changed mesh IP to %q, want %q", second.GetMeshIp(), meshIP)
+		}
+		if after := len(h.rs.State().ListNodes()); after != before {
+			t.Fatalf("re-join added a node record (before=%d after=%d) — duplicate", before, after)
+		}
+		verifyChain(t, h.ca, second.GetNodeCertPem()) // fresh cert re-issued for the same id
+	})
+
+	t.Run("unknown existing id falls back to fresh enrollment", func(t *testing.T) {
+		h := newJoinHarness(t, true)
+		secret := h.mintToken(t, false, 0, zatterav1.NodeRole_NODE_ROLE_WORKER)
+		csr, _ := genCSR(t)
+		resp, err := h.srv.Join(context.Background(), &clusterv1.JoinRequest{
+			TokenSecret: secret, ExistingNodeId: "01BOGUSNODEID", CsrPem: csr,
+		})
+		if err != nil {
+			t.Fatalf("join: %v", err)
+		}
+		if resp.GetNodeId() == "01BOGUSNODEID" || resp.GetNodeId() == "" {
+			t.Fatalf("unknown id should get a fresh node id, got %q", resp.GetNodeId())
+		}
+	})
+
 	t.Run("control token gets a low mesh IP", func(t *testing.T) {
 		h := newJoinHarness(t, true)
 		secret := h.mintToken(t, false, 0, zatterav1.NodeRole_NODE_ROLE_CONTROL)

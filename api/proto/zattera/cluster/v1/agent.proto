@@ -46,6 +46,10 @@ message JoinRequest {
   // CSR (PEM, PKCS#10) for the node's mTLS certificate. The control plane
   // signs it with the cluster CA and returns the certificate.
   bytes csr_pem = 12;
+  // existing_node_id, when set, is this node's id from a prior join: a
+  // restarting node re-enrolls under the same identity so it resumes its node
+  // record (and mesh IP) instead of registering a duplicate. Empty on first join.
+  string existing_node_id = 13;
 }
 
 message JoinResponse {
