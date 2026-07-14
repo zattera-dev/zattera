@@ -10,12 +10,16 @@
 package registry
 
 import (
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/zattera-dev/zattera/internal/pkgutil/ids"
 )
 
 // Sentinel errors returned by the store and upload manager. The HTTP layer
@@ -123,6 +127,46 @@ func (s *BlobStore) newUploadFile(id string) (*os.File, error) {
 		return nil, fmt.Errorf("registry: create upload: %w", err)
 	}
 	return f, nil
+}
+
+// Write streams r into the blob store, computing its digest as it goes, and
+// commits it under that digest. Used for content whose digest we do not know
+// in advance (manifests and image indexes, which are addressed by the sha256
+// of their own bytes). Returns the resulting digest and byte size.
+func (s *BlobStore) Write(r io.Reader) (string, int64, error) {
+	f, err := s.newUploadFile(ids.New())
+	if err != nil {
+		return "", 0, err
+	}
+	tmp := f.Name()
+	h := sha256.New()
+	n, err := io.Copy(io.MultiWriter(f, h), r)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		_ = os.Remove(tmp)
+		return "", 0, fmt.Errorf("registry: write blob: %w", err)
+	}
+	hexPart := hex.EncodeToString(h.Sum(nil))
+	if err := s.commit(tmp, hexPart); err != nil {
+		_ = os.Remove(tmp)
+		return "", 0, err
+	}
+	return "sha256:" + hexPart, n, nil
+}
+
+// Delete removes a blob by digest. A missing blob is not an error (GC calls
+// this idempotently).
+func (s *BlobStore) Delete(dgst string) error {
+	h, err := parseDigest(dgst)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(s.blobPath(h)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("registry: delete blob: %w", err)
+	}
+	return nil
 }
 
 // commit moves a fully-written, digest-verified temp file into the blob store.

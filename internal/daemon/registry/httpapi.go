@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -15,26 +16,41 @@ import (
 // this is a v2 registry.
 const apiVersionHeader = "registry/2.0"
 
-// Handler serves the OCI distribution push subset (T-31): the version probe,
-// blob existence checks, and the blob upload flow (start/patch/put, plus the
-// monolithic POST and cross-repo mount fallback). Manifests, tags and pull GC
-// are layered on in T-32.
+// maxManifestBytes caps a manifest/index body (they are small JSON documents;
+// blobs stream through the upload path instead).
+const maxManifestBytes = 8 << 20
+
+// Handler serves the OCI distribution API: the version probe and blob upload
+// flow (T-31) plus manifests, tags, pull and delete (T-32). A nil manifests
+// store leaves the manifest routes disabled (the T-31-only surface); a nil
+// Authenticator disables auth.
 type Handler struct {
-	store   *BlobStore
-	uploads *Uploads
-	log     *slog.Logger
+	store     *BlobStore
+	uploads   *Uploads
+	manifests *Manifests
+	auth      Authenticator
+	log       *slog.Logger
 }
 
-// NewHandler wires the HTTP surface over a blob store and upload manager.
+// NewHandler wires the blob/upload push surface (T-31) with no manifest store
+// or auth. Use newHandler (or registry.New) for the full T-32 surface.
 func NewHandler(store *BlobStore, uploads *Uploads, log *slog.Logger) *Handler {
+	return newHandler(store, uploads, nil, nil, log)
+}
+
+func newHandler(store *BlobStore, uploads *Uploads, manifests *Manifests, auth Authenticator, log *slog.Logger) *Handler {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Handler{store: store, uploads: uploads, log: log}
+	return &Handler{store: store, uploads: uploads, manifests: manifests, auth: auth, log: log}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Docker-Distribution-Api-Version", apiVersionHeader)
+
+	if !h.authorize(w, r) {
+		return
+	}
 
 	// Version probe: GET/HEAD /v2/.
 	if r.URL.Path == "/v2" || r.URL.Path == "/v2/" {
@@ -62,8 +78,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.blob(w, r, dgst)
 			return
 		}
+		// GET /v2/<name>/tags/list
+		if name, ok := strings.CutSuffix(rest, "/tags/list"); ok {
+			h.tagsList(w, r, name)
+			return
+		}
+		// GET/HEAD/PUT/DELETE /v2/<name>/manifests/<ref>
+		if i := strings.Index(rest, "/manifests/"); i >= 0 {
+			name := rest[:i]
+			ref := rest[i+len("/manifests/"):]
+			h.manifest(w, r, name, ref)
+			return
+		}
 	}
-	// Manifests, tags, etc. are T-32.
 	h.writeError(w, http.StatusNotFound, "UNSUPPORTED", "unsupported registry endpoint")
 }
 
@@ -184,6 +211,81 @@ func (h *Handler) blob(w http.ResponseWriter, r *http.Request, dgst string) {
 	}
 }
 
+func (h *Handler) manifest(w http.ResponseWriter, r *http.Request, name, ref string) {
+	if h.manifests == nil {
+		h.writeError(w, http.StatusNotFound, "UNSUPPORTED", "manifests not available")
+		return
+	}
+	switch r.Method {
+	case http.MethodGet, http.MethodHead:
+		body, mediaType, digest, err := h.manifests.GetManifest(name, ref)
+		if err != nil {
+			h.writeManifestError(w, err)
+			return
+		}
+		w.Header().Set("Content-Type", mediaType)
+		w.Header().Set("Docker-Content-Digest", digest)
+		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+		if r.Method == http.MethodHead {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(body)
+
+	case http.MethodPut:
+		body, err := io.ReadAll(io.LimitReader(r.Body, maxManifestBytes))
+		if err != nil {
+			h.writeError(w, http.StatusBadRequest, "MANIFEST_INVALID", "read manifest body")
+			return
+		}
+		digest, err := h.manifests.PutManifest(name, ref, r.Header.Get("Content-Type"), body)
+		if err != nil {
+			h.writeManifestError(w, err)
+			return
+		}
+		w.Header().Set("Location", fmt.Sprintf("/v2/%s/manifests/%s", name, digest))
+		w.Header().Set("Docker-Content-Digest", digest)
+		w.WriteHeader(http.StatusCreated)
+
+	case http.MethodDelete:
+		// DELETE is by digest per the distribution spec.
+		if err := h.manifests.DeleteManifest(name, ref); err != nil {
+			h.writeManifestError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+
+	default:
+		h.writeError(w, http.StatusMethodNotAllowed, "UNSUPPORTED", "method not allowed")
+	}
+}
+
+func (h *Handler) tagsList(w http.ResponseWriter, r *http.Request, name string) {
+	if h.manifests == nil {
+		h.writeError(w, http.StatusNotFound, "UNSUPPORTED", "manifests not available")
+		return
+	}
+	if r.Method != http.MethodGet {
+		h.writeError(w, http.StatusMethodNotAllowed, "UNSUPPORTED", "method not allowed")
+		return
+	}
+	tags, err := h.manifests.Tags(name)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, "UNKNOWN", err.Error())
+		return
+	}
+	if tags == nil {
+		tags = []string{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(struct {
+		Name string   `json:"name"`
+		Tags []string `json:"tags"`
+	}{Name: name, Tags: tags})
+}
+
 // --- response helpers ---
 
 func (h *Handler) writeBlobCreated(w http.ResponseWriter, name, digest string) {
@@ -215,6 +317,22 @@ func (h *Handler) writeUploadError(w http.ResponseWriter, err error) {
 		h.writeError(w, http.StatusBadRequest, "DIGEST_INVALID", "uploaded content does not match digest")
 	default:
 		h.log.Error("registry upload error", "err", err)
+		h.writeError(w, http.StatusInternalServerError, "UNKNOWN", err.Error())
+	}
+}
+
+func (h *Handler) writeManifestError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ErrManifestUnknown):
+		h.writeError(w, http.StatusNotFound, "MANIFEST_UNKNOWN", "manifest unknown")
+	case errors.Is(err, ErrManifestChildUnkn):
+		h.writeError(w, http.StatusNotFound, "MANIFEST_UNKNOWN", err.Error())
+	case errors.Is(err, ErrManifestBlobUnkn):
+		h.writeError(w, http.StatusBadRequest, "MANIFEST_BLOB_UNKNOWN", err.Error())
+	case errors.Is(err, ErrManifestInvalid):
+		h.writeError(w, http.StatusBadRequest, "MANIFEST_INVALID", "manifest invalid")
+	default:
+		h.log.Error("registry manifest error", "err", err)
 		h.writeError(w, http.StatusInternalServerError, "UNKNOWN", err.Error())
 	}
 }

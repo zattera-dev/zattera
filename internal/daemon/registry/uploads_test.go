@@ -234,7 +234,7 @@ func TestReapExpiresSessions(t *testing.T) {
 
 // --- helpers ---
 
-func do(t *testing.T, method, url, contentRange string, body []byte) *http.Response {
+func do(t *testing.T, method, url, contentRange string, body []byte, headers ...http.Header) *http.Response {
 	t.Helper()
 	var r io.Reader
 	if body != nil {
@@ -246,6 +246,13 @@ func do(t *testing.T, method, url, contentRange string, body []byte) *http.Respo
 	}
 	if contentRange != "" {
 		req.Header.Set("Content-Range", contentRange)
+	}
+	for _, hdr := range headers {
+		for k, vs := range hdr {
+			for _, v := range vs {
+				req.Header.Set(k, v)
+			}
+		}
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

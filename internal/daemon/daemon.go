@@ -233,6 +233,12 @@ func Run(ctx context.Context, cfg config.Config) error {
 	apiErr := make(chan error, 1)
 	go func() { apiErr <- apiSrv.Serve(ctx) }()
 
+	// Embedded registry (T-32): control nodes host image blobs on :5000, TLS
+	// with the CA server cert, authenticated by node creds and user PATs.
+	if _, err := startRegistry(ctx, cfg, st, authority, clk, log); err != nil {
+		log.Warn("registry start failed; continuing without it", "err", err)
+	}
+
 	// Node liveness (T-21): the leader turns livestate heartbeats into durable
 	// node status. evaluate() is a no-op on followers.
 	go api.NewLivenessMonitor(st, rs, live, clk, nodeID, log).Run(ctx)

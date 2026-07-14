@@ -58,6 +58,10 @@ type IngressConfig struct {
 
 type RegistryConfig struct {
 	Listen string `toml:"listen"`
+	// InsecureHTTP serves the embedded registry over plain HTTP instead of
+	// TLS. Intended for integration tests (and never for production); the CA
+	// server cert is used otherwise.
+	InsecureHTTP bool `toml:"insecure_http"`
 }
 
 type MeshConfig struct {
