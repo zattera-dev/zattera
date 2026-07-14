@@ -402,9 +402,18 @@ func (e *Executor) containerSpec(ctx context.Context, a *zatterav1.Assignment, r
 		}
 	}
 
-	var command []string
+	var command, entrypoint []string
 	if c := strings.TrimSpace(spec.GetCommand()); c != "" {
-		command = []string{"/bin/sh", "-c", c}
+		// A one-shot job runs an arbitrary command that must replace the
+		// container's process. Override the image ENTRYPOINT: leaving it in
+		// place would pass the command as arguments to it (e.g. a web-server
+		// entrypoint that ignores them and runs forever, so the job never
+		// exits). Services keep the historical CMD-only behavior.
+		if a.GetJobId() != "" {
+			entrypoint = []string{"/bin/sh", "-c", c}
+		} else {
+			command = []string{"/bin/sh", "-c", c}
+		}
 	}
 
 	stopGrace := defaultStopGrace
@@ -420,13 +429,14 @@ func (e *Executor) containerSpec(ctx context.Context, a *zatterav1.Assignment, r
 	}
 
 	return runtime.ContainerSpec{
-		Name:    containerName(a),
-		Image:   rt.GetImageRef(),
-		Command: command,
-		Env:     envList(rt.GetEnv()),
-		Labels:  e.labels(a, runtime.LabelRole),
-		Ports:   ports,
-		Mounts:  mounts,
+		Name:       containerName(a),
+		Image:      rt.GetImageRef(),
+		Command:    command,
+		Entrypoint: entrypoint,
+		Env:        envList(rt.GetEnv()),
+		Labels:     e.labels(a, runtime.LabelRole),
+		Ports:      ports,
+		Mounts:     mounts,
 		Resources: runtime.Resources{
 			CPUMillis: spec.GetResources().GetCpuMillis(),
 			MemoryMB:  spec.GetResources().GetMemoryMb(),

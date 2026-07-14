@@ -407,6 +407,13 @@ func Run(ctx context.Context, cfg config.Config) error {
 			rt = dk
 		}
 
+		// Dev is ephemeral: reap this node's managed containers on graceful
+		// shutdown so a dev run leaves nothing behind. Production keeps them
+		// running so a daemon restart re-adopts them without downtime.
+		if cfg.Dev && rt != nil {
+			defer reapManagedContainers(rt, log)
+		}
+
 		// Registry credential for the co-located node: in production the
 		// embedded registry requires auth, but only joining workers are minted
 		// one (T-17) — without this, the control node's builder cannot push and
@@ -474,6 +481,23 @@ func Run(ctx context.Context, cfg config.Config) error {
 		return nil
 	case err := <-apiErr:
 		return err
+	}
+}
+
+// reapManagedContainers force-removes every container this node manages. Used on
+// dev shutdown (ctx is already canceled, so it runs on a fresh bounded context).
+func reapManagedContainers(rt crt.ContainerRuntime, log *slog.Logger) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	infos, err := rt.ListContainers(ctx, nil) // ListContainers always filters on ManagedLabel
+	if err != nil {
+		log.Warn("dev shutdown: list managed containers", "err", err)
+		return
+	}
+	for _, in := range infos {
+		if err := rt.RemoveContainer(ctx, in.ID, true); err != nil {
+			log.Warn("dev shutdown: remove container", "id", in.ID, "err", err)
+		}
 	}
 }
 

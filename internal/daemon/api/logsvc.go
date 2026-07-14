@@ -59,6 +59,12 @@ func NewLogServer(store *state.Store, dial LogDialer, clk clock.Clock, log *slog
 // Query streams merged log lines for a selector.
 func (s *LogServer) Query(q *zatterav1.LogQuery, stream grpc.ServerStreamingServer[zatterav1.LogLine]) error {
 	ctx := stream.Context()
+	// Normalize the selector's project reference to its canonical id: clients
+	// pass the project name (e.g. --project smoke) but assignments — and the
+	// per-node stream resolver — match on the id. This same q is forwarded to
+	// each agent, so resolving it here fixes both the node fan-out and the
+	// agent-side match.
+	s.resolveSelectorProject(q.GetSelector())
 	nodes := s.resolveNodes(q.GetSelector())
 	if len(nodes) == 0 {
 		return nil
@@ -179,6 +185,21 @@ func (s *LogServer) follow(ctx context.Context, nodes []*zatterav1.Node, q *zatt
 				return err
 			}
 		}
+	}
+}
+
+// resolveSelectorProject rewrites a project name in the selector to its id, in
+// place. A no-op when the ref is empty or already a known id.
+func (s *LogServer) resolveSelectorProject(sel *zatterav1.LogSelector) {
+	ref := sel.GetProjectId()
+	if ref == "" {
+		return
+	}
+	if _, ok := s.store.Project(ref); ok {
+		return // already an id
+	}
+	if p, ok := s.store.ProjectByName(ref); ok {
+		sel.ProjectId = p.GetMeta().GetId()
 	}
 }
 

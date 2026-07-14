@@ -76,15 +76,16 @@ const (
 
 // ContainerSpec is everything needed to create a container.
 type ContainerSpec struct {
-	Name      string
-	Image     string
-	Command   []string // empty = image default
-	Env       []string // "KEY=value"
-	Labels    map[string]string
-	Ports     []PortBinding
-	Mounts    []Mount
-	Resources Resources
-	Restart   RestartPolicy
+	Name       string
+	Image      string
+	Command    []string // empty = image default (Docker CMD)
+	Entrypoint []string // empty = image default (Docker ENTRYPOINT)
+	Env        []string // "KEY=value"
+	Labels     map[string]string
+	Ports      []PortBinding
+	Mounts     []Mount
+	Resources  Resources
+	Restart    RestartPolicy
 	// Network to attach (per project+env bridge). Empty = default bridge.
 	Network string
 	// DNS servers for the container (the per-network internal resolver).

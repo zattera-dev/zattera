@@ -93,6 +93,30 @@ func TestLogFanoutMergeOrders(t *testing.T) {
 	}
 }
 
+func TestLogSelectorResolvesProjectName(t *testing.T) {
+	rs := raftstore.NewTestStore(t)
+	st := rs.State()
+	// A project whose id differs from its name; the assignment stores the id.
+	st.PutProject(&zatterav1.Project{Meta: &zatterav1.Meta{Id: "proj-ulid"}, Name: "smoke"})
+	st.PutNode(&zatterav1.Node{Meta: &zatterav1.Meta{Id: "n1"}, Status: zatterav1.NodeStatus_NODE_STATUS_ALIVE})
+	st.PutAssignment(&zatterav1.Assignment{
+		Meta: &zatterav1.Meta{Id: "asg-1"}, EnvironmentId: "env1", ProjectId: "proj-ulid", AppId: "app", NodeId: "n1",
+		Desired: zatterav1.AssignmentDesired_ASSIGNMENT_DESIRED_RUN,
+	})
+	dialer := &fakeLogDialer{streams: map[string][]*zatterav1.LogLine{"n1": {logLine("n1", 1, "hi")}}}
+	srv := NewLogServer(st, dialer, clock.NewFake(), nil)
+
+	// Client passes the project NAME (as the CLI does); it must resolve to the id
+	// so the assignment (and thus its node) is matched.
+	sink := &collectSink{ctx: context.Background()}
+	if err := srv.Query(&zatterav1.LogQuery{Selector: &zatterav1.LogSelector{ProjectId: "smoke"}}, sink); err != nil {
+		t.Fatal(err)
+	}
+	if len(sink.sent) != 1 || sink.sent[0].GetLine() != "hi" {
+		t.Fatalf("project-name selector should resolve and match, got %d lines", len(sink.sent))
+	}
+}
+
 func TestLogFanoutDeadNodePartial(t *testing.T) {
 	rs := raftstore.NewTestStore(t)
 	seedLogNodes(rs, "n1", "n2")

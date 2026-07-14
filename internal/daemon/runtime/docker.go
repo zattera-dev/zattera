@@ -104,6 +104,7 @@ func (d *Docker) CreateContainer(ctx context.Context, spec ContainerSpec) (strin
 	exposed, bindings := portMaps(spec.Ports)
 	cfg := &container.Config{
 		Image:        spec.Image,
+		Entrypoint:   spec.Entrypoint,
 		Cmd:          spec.Command,
 		Env:          spec.Env,
 		Labels:       labels,

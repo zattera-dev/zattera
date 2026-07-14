@@ -215,11 +215,14 @@ func (s *SyncServer) buildRuntime(a *zatterav1.Assignment) *clusterv1.Assignment
 		return nil
 	}
 	spec := rel.GetService()
-	// Job assignments (T-53) run the job's command instead of the service CMD.
+	// Job assignments (T-53) run the job's command instead of the service CMD,
+	// and are one-shot: they must not be health-probed (the command is not the
+	// service and would never satisfy the service's healthcheck).
 	if jobID := a.GetJobId(); jobID != "" {
 		if job, ok := s.store.Job(jobID); ok && job.GetCommand() != "" {
 			spec = proto.Clone(rel.GetService()).(*zatterav1.ServiceSpec)
 			spec.Command = job.GetCommand()
+			spec.Healthcheck = nil
 		}
 	}
 	rt := &clusterv1.AssignmentRuntime{
