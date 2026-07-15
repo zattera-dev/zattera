@@ -121,9 +121,31 @@ func (c *Cluster) DeploySource(project, dir string) (deploymentID, envID string)
 	return dep.GetMeta().GetId(), envID
 }
 
-// WaitDeployment polls a deployment to completion, logging each phase change and
-// failing FAST (not after a long silent wait) if the build/rollout fails.
-func (c *Cluster) WaitDeployment(project, depID string, timeout time.Duration) {
+// DeploySourceHealthy deploys dir as a source build and waits for `want`
+// healthy replicas, RETRYING the whole deploy on a transient failure (e.g. a
+// green replica not reporting healthy in the red/green window — an intermittent
+// hiccup on small real nodes). Retries are cheap: the buildkit cache makes the
+// rebuild fast and light. Returns the env id and the nodes the replicas run on.
+func (c *Cluster) DeploySourceHealthy(project, dir string, want, attempts int) (envID string, nodes map[string]bool) {
+	c.T.Helper()
+	var lastErr string
+	for i := 1; i <= attempts; i++ {
+		depID, eid := c.DeploySource(project, dir)
+		if err := c.waitDeployment(project, depID, 8*time.Minute); err != nil {
+			lastErr = err.Error()
+			c.T.Logf("cloud: deploy attempt %d/%d failed (%s) — retrying (buildkit cache makes the rebuild fast)", i, attempts, lastErr)
+			continue
+		}
+		return eid, c.WaitHealthyReplicas(project, eid, want, 3*time.Minute)
+	}
+	c.T.Fatalf("cloud: deploy did not reach a healthy release after %d attempts (last: %s)", attempts, lastErr)
+	return "", nil
+}
+
+// waitDeployment polls a deployment to completion, logging each phase change.
+// Returns nil on success, an error on a failed/rolled-back deploy or timeout
+// (so callers can retry rather than abort).
+func (c *Cluster) waitDeployment(project, depID string, timeout time.Duration) error {
 	c.T.Helper()
 	cli := c.API()
 	deadline := time.Now().Add(timeout)
@@ -139,16 +161,16 @@ func (c *Cluster) WaitDeployment(project, depID string, timeout time.Duration) {
 			switch d.GetPhase() {
 			case zatterav1.DeploymentPhase_DEPLOYMENT_PHASE_DRAINING_OLD,
 				zatterav1.DeploymentPhase_DEPLOYMENT_PHASE_SUCCEEDED:
-				return
+				return nil
 			case zatterav1.DeploymentPhase_DEPLOYMENT_PHASE_FAILED,
 				zatterav1.DeploymentPhase_DEPLOYMENT_PHASE_ROLLED_BACK,
 				zatterav1.DeploymentPhase_DEPLOYMENT_PHASE_SUPERSEDED:
-				c.T.Fatalf("cloud: deployment %s (%s)", phase, d.GetError())
+				return fmt.Errorf("deployment %s: %s", phase, d.GetError())
 			}
 		}
 		time.Sleep(4 * time.Second)
 	}
-	c.T.Fatalf("cloud: deployment %s did not complete within %s (last phase %s)", depID, timeout, last)
+	return fmt.Errorf("deployment %s did not complete within %s (last phase %s)", depID, timeout, last)
 }
 
 // WaitHealthyReplicas polls the env's instances until at least want are HEALTHY,

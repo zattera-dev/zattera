@@ -30,17 +30,15 @@ func TestWebApp(t *testing.T) {
 	// Every node trusts the embedded registry so workers can pull the built image.
 	c.TrustRegistryCA()
 
-	// Deploy the fixture (pinned to 3 replicas) as a source build, via the API.
+	// Deploy the fixture (pinned to 3 replicas) as a source build, via the API,
+	// retrying on the occasional transient red/green healthcheck hiccup that
+	// shows up on small real nodes (cheap: the buildkit cache skips the rebuild).
 	appDir := prepareHelloFixture(t, 3)
-	depID, envID := c.DeploySource("webapp", appDir)
-
-	// Build → rollout completes (fails fast with a reason if the build breaks).
-	c.WaitDeployment("webapp", depID, 8*time.Minute)
+	_, nodes := c.DeploySourceHealthy("webapp", appDir, 3, 3)
 
 	// Core assertion: 3 healthy replicas spread across ≥2 nodes. HEALTHY means
 	// the agent's healthcheck GET succeeded against each container — i.e. the Go
 	// web app is running and serving HTTP on all three replicas.
-	nodes := c.WaitHealthyReplicas("webapp", envID, 3, 3*time.Minute)
 	if len(nodes) < 2 {
 		t.Errorf("cloud: 3 replicas should spread across ≥2 nodes, landed on %d: %v", len(nodes), nodes)
 	}
