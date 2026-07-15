@@ -268,10 +268,29 @@ func (c *Cluster) resolveServerType(arch string) string {
 	if err != nil {
 		c.T.Fatalf("cloud: list server types in %s: %v", c.region, err)
 	}
+	// Prefer the cheapest ≥2-vCPU type: a 1-vCPU node is too weak to reliably
+	// run a full Zattera node (control plane + raft + registry + buildkit +
+	// docker + app replicas) — replicas' healthchecks flake under the
+	// contention. Fall back to the cheapest 1-vCPU only if nothing bigger is
+	// orderable. (The cheapest amd64 type in nbg1, cx23, is 2-vCPU anyway; the
+	// harness only fell to 1-vCPU cpx12 when cx23 was momentarily unavailable.)
 	best, bestPrice := "", math.MaxFloat64
+	fallback, fbPrice := "", math.MaxFloat64
 	for _, st := range types {
-		if st.Arch == arch && st.HourlyPriceEUR > 0 && st.HourlyPriceEUR < bestPrice {
+		if st.Arch != arch || st.HourlyPriceEUR <= 0 {
+			continue
+		}
+		if st.HourlyPriceEUR < fbPrice {
+			fallback, fbPrice = st.Name, st.HourlyPriceEUR
+		}
+		if st.Cores >= 2 && st.HourlyPriceEUR < bestPrice {
 			best, bestPrice = st.Name, st.HourlyPriceEUR
+		}
+	}
+	if best == "" {
+		best, bestPrice = fallback, fbPrice
+		if best != "" {
+			c.T.Logf("cloud: no ≥2-vCPU %s type orderable in %s — falling back to 1-vCPU %s (workloads may be flaky)", arch, c.region, best)
 		}
 	}
 	if best == "" {
