@@ -74,6 +74,14 @@ test-e2e: build ## Full single-node E2E smoke test (requires Docker)
 test-chaos: ## Simulated-cluster chaos tests (no Docker, slow)
 	go test -tags chaos -count=1 -timeout 30m ./test/chaos/...
 
+.PHONY: test-cloud
+test-cloud: ## Real-cloud cluster tests (needs HCLOUD_TOKEN; SPINS PAID VMs)
+	go test -tags cloud -count=1 -timeout 30m -v ./test/cloud/...
+
+.PHONY: cloud-reap
+cloud-reap: ## Destroy ALL leftover harness cloud resources (needs HCLOUD_TOKEN)
+	go test -tags cloud -count=1 -run TestCloudReap -v ./test/cloud/...
+
 .PHONY: check-generate
 check-generate: generate ## CI: fail if generated code is stale
 	git diff --exit-code -- api/gen api/openapi

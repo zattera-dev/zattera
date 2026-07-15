@@ -1,0 +1,434 @@
+//go:build cloud
+
+package cloud
+
+import (
+	"bytes"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/pem"
+	"fmt"
+	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"runtime"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"golang.org/x/crypto/ssh"
+
+	"github.com/zattera-dev/zattera/test/cloud/provider"
+)
+
+// NodeSpec describes a node to create.
+type NodeSpec struct {
+	Name  string // optional; defaults to zt-<run>-<role>-<n>
+	Role  string // "control" | "worker"
+	Arch  string // "amd64" | "arm64"
+	Image string // optional; defaults to the cluster image
+
+	// NAT simulation: no public IPv4, reachable/egressing only via a private
+	// network. Requires NetworkIDs and (for egress) a gateway node.
+	NoPublicIPv4 bool
+	NetworkIDs   []int64
+}
+
+// Node is a live cloud VM plus its SSH session and Zattera role.
+type Node struct {
+	c       *Cluster
+	machine provider.Machine
+	spec    NodeSpec
+
+	mu  sync.Mutex
+	ssh *ssh.Client
+
+	// populated for the control node after bring-up.
+	bootstrapToken string
+	caFingerprint  string
+}
+
+var (
+	tokenRE = regexp.MustCompile(`zpat_[A-Za-z0-9_-]+`)
+	caFPRE  = regexp.MustCompile(`sha256=([0-9a-f]+)`)
+)
+
+// CreateNode provisions a VM, waits for it to run, and opens an SSH session.
+// It does NOT install Zattera — call InstallDocker/InstallBinary or the
+// higher-level StartControl/JoinWorker helpers.
+func (c *Cluster) CreateNode(spec NodeSpec) *Node {
+	c.T.Helper()
+	if spec.Arch == "" {
+		spec.Arch = "amd64"
+	}
+	serverType, err := serverTypeForArch(spec.Arch)
+	if err != nil {
+		c.T.Fatal(err)
+	}
+	if spec.Name == "" {
+		spec.Name = fmt.Sprintf("zt-%s-%s-%d", c.runID, spec.Role, len(c.nodes)+1)
+	}
+	image := spec.Image
+	if image == "" {
+		image = defaultImage
+	}
+
+	labels := c.baseLabels()
+	labels[labelRole] = spec.Role
+	labels[labelName] = spec.Name
+
+	ms := provider.MachineSpec{
+		Name:       spec.Name,
+		Region:     c.region,
+		ServerType: serverType,
+		Image:      image,
+		Labels:     labels,
+		SSHKeyIDs:  []int64{c.sshKeyID},
+		NetworkIDs: spec.NetworkIDs,
+	}
+	if spec.NoPublicIPv4 {
+		no := false
+		ms.EnableIPv4 = &no
+	}
+
+	c.T.Logf("cloud: creating %s (%s/%s, %s)", spec.Name, spec.Arch, serverType, c.region)
+	m, err := c.driver.Create(c.Ctx, ms)
+	if err != nil {
+		c.T.Fatalf("cloud: create %s: %v", spec.Name, err)
+	}
+	n := &Node{c: c, machine: m, spec: spec}
+	c.nodes = append(c.nodes, n)
+
+	n.waitRunning()
+	if !spec.NoPublicIPv4 {
+		n.connectSSH()
+	}
+	return n
+}
+
+// PublicIPv4 / PublicIPv6 return the node's public addresses (empty for a
+// NAT-simulated node with no public IPv4).
+func (n *Node) PublicIPv4() string { return n.machine.PublicIPv4 }
+func (n *Node) PublicIPv6() string { return n.machine.PublicIPv6 }
+func (n *Node) Name() string       { return n.spec.Name }
+func (n *Node) Arch() string       { return n.spec.Arch }
+func (n *Node) ProviderID() string { return n.machine.ProviderID }
+
+// waitRunning polls the provider until the machine reports "running" and a
+// public IPv4 is assigned (unless NAT-simulated).
+func (n *Node) waitRunning() {
+	n.c.T.Helper()
+	deadline := time.Now().Add(provisionTimeout)
+	for time.Now().Before(deadline) {
+		m, err := n.c.driver.Get(n.c.Ctx, n.machine.ProviderID)
+		if err == nil {
+			n.machine = m
+			ipReady := n.spec.NoPublicIPv4 || m.PublicIPv4 != ""
+			if m.Status == provider.StatusRunning && ipReady {
+				return
+			}
+		}
+		time.Sleep(3 * time.Second)
+	}
+	n.c.T.Fatalf("cloud: %s never reached running within %s", n.spec.Name, provisionTimeout)
+}
+
+// connectSSH dials the node over SSH with the run's ephemeral key, retrying
+// while sshd comes up. Host keys are ignored — these are ephemeral hosts.
+func (n *Node) connectSSH() {
+	n.c.T.Helper()
+	cfg := &ssh.ClientConfig{
+		User:            "root",
+		Auth:            []ssh.AuthMethod{ssh.PublicKeys(n.c.signer)},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         10 * time.Second,
+	}
+	addr := net.JoinHostPort(n.machine.PublicIPv4, "22")
+	deadline := time.Now().Add(provisionTimeout)
+	for time.Now().Before(deadline) {
+		client, err := ssh.Dial("tcp", addr, cfg)
+		if err == nil {
+			n.mu.Lock()
+			n.ssh = client
+			n.mu.Unlock()
+			return
+		}
+		time.Sleep(3 * time.Second)
+	}
+	n.c.T.Fatalf("cloud: %s ssh never came up at %s", n.spec.Name, addr)
+}
+
+// connectSSHViaJump reaches a node that has no public IP by tunnelling through
+// a public gateway node (which must already have an SSH session and sit on the
+// same private network). Used for true no-public-IP NAT simulation.
+func (n *Node) connectSSHViaJump(gateway *Node) {
+	n.c.T.Helper()
+	target := net.JoinHostPort(n.machine.PrivateIPv4, "22")
+	cfg := &ssh.ClientConfig{
+		User:            "root",
+		Auth:            []ssh.AuthMethod{ssh.PublicKeys(n.c.signer)},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         10 * time.Second,
+	}
+	deadline := time.Now().Add(provisionTimeout)
+	for time.Now().Before(deadline) {
+		gateway.mu.Lock()
+		gw := gateway.ssh
+		gateway.mu.Unlock()
+		if gw != nil {
+			conn, err := gw.Dial("tcp", target)
+			if err == nil {
+				sshConn, chans, reqs, cerr := ssh.NewClientConn(conn, target, cfg)
+				if cerr == nil {
+					n.mu.Lock()
+					n.ssh = ssh.NewClient(sshConn, chans, reqs)
+					n.mu.Unlock()
+					return
+				}
+			}
+		}
+		time.Sleep(3 * time.Second)
+	}
+	n.c.T.Fatalf("cloud: %s ssh-via-jump never came up (private %s)", n.spec.Name, n.machine.PrivateIPv4)
+}
+
+// Run executes a command over SSH and returns combined stdout+stderr.
+func (n *Node) Run(cmd string) (string, error) {
+	n.mu.Lock()
+	client := n.ssh
+	n.mu.Unlock()
+	if client == nil {
+		return "", fmt.Errorf("cloud: %s has no ssh session", n.spec.Name)
+	}
+	sess, err := client.NewSession()
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = sess.Close() }()
+	var out bytes.Buffer
+	sess.Stdout = &out
+	sess.Stderr = &out
+	err = sess.Run(cmd)
+	return out.String(), err
+}
+
+// MustRun runs cmd and fails the test on error, echoing the output.
+func (n *Node) MustRun(cmd string) string {
+	n.c.T.Helper()
+	out, err := n.Run(cmd)
+	if err != nil {
+		n.c.T.Fatalf("cloud: %s: `%s` failed: %v\n%s", n.spec.Name, cmd, err, out)
+	}
+	return out
+}
+
+// Push writes content to remotePath on the node (via a heredoc over SSH — no
+// scp dependency), then chmods it.
+func (n *Node) Push(content []byte, remotePath, mode string) {
+	n.c.T.Helper()
+	dir := filepath.Dir(remotePath)
+	// base64 avoids any quoting/escaping hazards for binaries and configs.
+	enc := base64Encode(content)
+	script := fmt.Sprintf("mkdir -p %s && base64 -d > %s <<'B64EOF'\n%s\nB64EOF\nchmod %s %s",
+		shQuote(dir), shQuote(remotePath), enc, mode, shQuote(remotePath))
+	if out, err := n.Run(script); err != nil {
+		n.c.T.Fatalf("cloud: push %s to %s: %v\n%s", mode, remotePath, err, out)
+	}
+}
+
+// InstallDocker installs Docker (idempotent) and enables the service.
+func (n *Node) InstallDocker() {
+	n.c.T.Helper()
+	n.c.T.Logf("cloud: [%s] installing docker", n.spec.Name)
+	n.MustRun(`set -e
+if systemctl is-active --quiet firewalld 2>/dev/null; then systemctl disable --now firewalld; fi
+if ! command -v docker >/dev/null 2>&1; then curl -fsSL https://get.docker.com | sh; fi
+systemctl enable --now docker
+docker info --format '{{.ServerVersion}}' >/dev/null`)
+}
+
+// InstallBinary cross-compiles zattera for the node's arch, uploads it, and
+// installs the systemd unit.
+func (n *Node) InstallBinary() {
+	n.c.T.Helper()
+	bin := n.c.buildBinary(n.spec.Arch)
+	data, err := os.ReadFile(bin)
+	if err != nil {
+		n.c.T.Fatalf("cloud: read binary: %v", err)
+	}
+	n.c.T.Logf("cloud: [%s] uploading zattera (linux/%s, %d MiB)", n.spec.Name, n.spec.Arch, len(data)/(1<<20))
+	n.MustRun("systemctl stop zattera 2>/dev/null || true; mkdir -p /etc/zattera")
+	n.Push(data, "/usr/local/bin/zattera", "0755")
+	n.Push([]byte(systemdUnit), "/etc/systemd/system/zattera.service", "0644")
+	n.MustRun("systemctl daemon-reload")
+}
+
+// WriteControlConfig writes a control+worker config (mesh advertising the
+// node's public IPv4).
+func (n *Node) WriteControlConfig(domain string) {
+	cfg := fmt.Sprintf(`node_name = %q
+data_dir  = "/var/lib/zattera"
+roles     = ["control", "worker"]
+domain    = %q
+
+[api]
+listen         = ":8443"
+advertise_addr = "%s:8443"
+
+[registry]
+listen = ":5000"
+
+[mesh]
+listen_port      = 51820
+public_endpoints = ["%s:51820"]
+
+[acme]
+disabled = true
+`, n.spec.Name, domain, n.machine.PublicIPv4, n.machine.PublicIPv4)
+	n.Push([]byte(cfg), "/etc/zattera/config.toml", "0644")
+}
+
+// WriteWorkerConfig writes a worker config that joins controlIP with token.
+func (n *Node) WriteWorkerConfig(controlIP, token string) {
+	// Mesh endpoint: a NAT node has no public IPv4 — advertise nothing and let
+	// disco/hole-punching (or the private IP) handle it.
+	meshEndpoint := ""
+	if n.machine.PublicIPv4 != "" {
+		meshEndpoint = fmt.Sprintf("\npublic_endpoints = [\"%s:51820\"]", n.machine.PublicIPv4)
+	}
+	cfg := fmt.Sprintf(`node_name = %q
+data_dir  = "/var/lib/zattera"
+roles     = ["worker"]
+
+[join]
+addr  = "%s:8443"
+token = %q
+
+[mesh]
+listen_port      = 51820%s
+`, n.spec.Name, controlIP, token, meshEndpoint)
+	n.Push([]byte(cfg), "/etc/zattera/config.toml", "0644")
+}
+
+// StartService enables and (re)starts the zattera unit.
+func (n *Node) StartService() {
+	n.c.T.Helper()
+	n.MustRun("systemctl reset-failed zattera 2>/dev/null || true; systemctl enable zattera; systemctl restart zattera")
+}
+
+// WaitAPIListening blocks until :8443 is accepting connections on the node.
+func (n *Node) WaitAPIListening() {
+	n.c.T.Helper()
+	n.waitFor(joinTimeout, "API :8443", func() bool {
+		out, _ := n.Run("ss -ltn | grep -q ':8443' && echo up")
+		return strings.Contains(out, "up")
+	})
+}
+
+// CaptureBootstrap reads the one-time admin token + CA fingerprint from the
+// control node's journal (they are printed once at first boot).
+func (n *Node) CaptureBootstrap() (token, caFP string) {
+	n.c.T.Helper()
+	out := n.MustRun("journalctl -u zattera --no-pager")
+	if m := tokenRE.FindString(out); m != "" {
+		n.bootstrapToken = m
+	}
+	if m := caFPRE.FindStringSubmatch(out); len(m) == 2 {
+		n.caFingerprint = m[1]
+	}
+	if n.bootstrapToken == "" {
+		n.c.T.Fatal("cloud: bootstrap token not found in control journal (stale data dir? destroy and retry)")
+	}
+	return n.bootstrapToken, n.caFingerprint
+}
+
+// Journal returns the last n lines of a systemd unit's log (for bundles).
+func (n *Node) Journal(unit string, lines int) string {
+	out, _ := n.Run(fmt.Sprintf("journalctl -u %s --no-pager -n %d", shQuote(unit), lines))
+	return out
+}
+
+func (n *Node) waitFor(timeout time.Duration, what string, cond func() bool) {
+	n.c.T.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(3 * time.Second)
+	}
+	n.c.T.Fatalf("cloud: %s: %s not ready within %s", n.spec.Name, what, timeout)
+}
+
+// --- binary build (cached per arch) ---------------------------------------
+
+func (c *Cluster) buildBinary(arch string) string {
+	c.T.Helper()
+	if c.binDir == "" {
+		c.binDir = c.T.TempDir()
+	}
+	out := filepath.Join(c.binDir, "zattera-linux-"+arch)
+	if _, err := os.Stat(out); err == nil {
+		return out // cached
+	}
+	root := repoRoot(c.T)
+	c.T.Logf("cloud: building zattera for linux/%s", arch)
+	cmd := exec.CommandContext(c.Ctx, "go", "build", "-trimpath", "-o", out, "./cmd/zattera")
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOARCH="+arch)
+	if b, err := cmd.CombinedOutput(); err != nil {
+		c.T.Fatalf("cloud: build linux/%s: %v\n%s", arch, err, b)
+	}
+	return out
+}
+
+func repoRoot(t *testing.T) string {
+	t.Helper()
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("cloud: cannot locate repo root")
+	}
+	return filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
+}
+
+const systemdUnit = `[Unit]
+Description=Zattera node
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+ExecStart=/usr/local/bin/zattera server --config /etc/zattera/config.toml
+Restart=always
+RestartSec=3
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+`
+
+// generateSSHKey returns an ssh signer, the authorized-keys public line, and
+// the PEM-encoded private key.
+func generateSSHKey(t *testing.T) (ssh.Signer, string, []byte) {
+	t.Helper()
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("cloud: gen ssh key: %v", err)
+	}
+	signer, err := ssh.NewSignerFromKey(priv)
+	if err != nil {
+		t.Fatalf("cloud: ssh signer: %v", err)
+	}
+	sshPub, err := ssh.NewPublicKey(pub)
+	if err != nil {
+		t.Fatalf("cloud: ssh public key: %v", err)
+	}
+	block, err := ssh.MarshalPrivateKey(priv, "zattera-harness")
+	if err != nil {
+		t.Fatalf("cloud: marshal private key: %v", err)
+	}
+	return signer, strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshPub))), pem.EncodeToMemory(block)
+}
