@@ -8,9 +8,11 @@
 // `go test ./...` never spins paid infra. Cloud tests carry the `cloud` build
 // tag and are run explicitly:
 //
-//	HCLOUD_TOKEN=... go test -tags cloud ./test/cloud/ -run TestCloudSmoke -v
+//	HCLOUD_TOKEN=... go test -tags cloud ./test/cloud/ -run TestThreeNodeCluster -v
 //
-// Safety: every resource is labelled zattera-harness=1 with a creation
+// Safety: NewCluster refuses to run in a project that already holds servers the
+// harness did not create (use a dedicated Hetzner project). Every resource is
+// labelled zattera-harness=1 with a creation
 // timestamp; NewCluster reaps harness resources older than the max age BEFORE
 // each run, and each run tears its own down at the end. So even a crashed or
 // kept-alive run cannot leak paying servers indefinitely.
@@ -105,11 +107,42 @@ func NewCluster(t *testing.T) *Cluster {
 		keyDir: t.TempDir(),
 	}
 
+	c.preflightDedicatedProject()
 	c.reapStale()
 	c.ensureSSHKey()
 	t.Cleanup(c.teardown)
 	t.Logf("cloud: run %s in %s (keep-on-fail=%v)", c.runID, region, c.keep)
 	return c
+}
+
+// preflightDedicatedProject fails fast if the token's project contains any
+// server the harness did NOT create (no zattera-harness label). It is the guard
+// against pointing a shared-project token — one that also holds your real
+// infrastructure — at a harness that creates and destroys resources. Use a
+// dedicated, empty Hetzner project; override only if you fully understand the
+// blast radius (ZT_CLOUD_ALLOW_SHARED_PROJECT=1).
+func (c *Cluster) preflightDedicatedProject() {
+	if os.Getenv("ZT_CLOUD_ALLOW_SHARED_PROJECT") == "1" {
+		c.T.Log("cloud: ZT_CLOUD_ALLOW_SHARED_PROJECT=1 — shared-project guard DISABLED")
+		return
+	}
+	all, err := c.driver.List(c.Ctx, nil) // nil selector = every server in the project
+	if err != nil {
+		c.T.Fatalf("cloud: preflight list failed (is HCLOUD_TOKEN valid?): %v", err)
+	}
+	var foreign []string
+	for _, m := range all {
+		if m.Labels[labelHarness] != "1" {
+			foreign = append(foreign, m.Name)
+		}
+	}
+	if len(foreign) > 0 {
+		c.T.Fatalf("cloud: REFUSING to run — this token's project already contains %d server(s) "+
+			"the harness did not create: %v.\n"+
+			"Point the harness at a DEDICATED, empty Hetzner project so it can never touch your real "+
+			"infrastructure. To override (not recommended), set ZT_CLOUD_ALLOW_SHARED_PROJECT=1.",
+			len(foreign), foreign)
+	}
 }
 
 // baseLabels are stamped on every resource for List/reaper/teardown scoping.

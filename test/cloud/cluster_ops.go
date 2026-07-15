@@ -139,6 +139,27 @@ func (c *Cluster) WaitNodeRegistered(name string) {
 	c.T.Fatalf("cloud: node %q never registered within %s", name, joinTimeout)
 }
 
+// WaitNodesReady blocks until at least count nodes are registered AND report
+// status ALIVE — the "the cluster is fully up" barrier scenarios wait on.
+func (c *Cluster) WaitNodesReady(count int) {
+	c.T.Helper()
+	deadline := time.Now().Add(joinTimeout)
+	var alive int
+	for time.Now().Before(deadline) {
+		alive = 0
+		for _, n := range c.Nodes() {
+			if n.GetStatus() == zatterav1.NodeStatus_NODE_STATUS_ALIVE {
+				alive++
+			}
+		}
+		if alive >= count {
+			return
+		}
+		time.Sleep(3 * time.Second)
+	}
+	c.T.Fatalf("cloud: only %d/%d nodes ALIVE within %s", alive, count, joinTimeout)
+}
+
 // NodeByName returns the cluster's view of a node (nil if absent).
 func (c *Cluster) NodeByName(name string) *zatterav1.Node {
 	for _, n := range c.Nodes() {

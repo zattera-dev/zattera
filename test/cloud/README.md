@@ -18,8 +18,10 @@ keep-on-fail reaper) on top.
 ## Running
 
 ```bash
-export HCLOUD_TOKEN=...          # a Hetzner Cloud API token
-make test-cloud                  # or: go test -tags cloud -v ./test/cloud/ -run TestCloudSmoke
+export HCLOUD_TOKEN=...          # a Hetzner Cloud API token (see safety below)
+make test-cloud                  # runs every scenario
+# or a single scenario:
+go test -tags cloud -v ./test/cloud/ -run TestThreeNodeCluster
 ```
 
 Without `HCLOUD_TOKEN` the tests **skip** — `go test ./...` never spins paid
@@ -27,14 +29,52 @@ infra. The `cloud` build tag keeps the harness out of normal builds.
 
 ### Cost & safety
 
-A mixed-arch 2-node cluster for a full run costs well under €0.05 (Hetzner
-bills hourly: cx22 ≈ €0.008/h, cax11 ≈ €0.007/h). Safety nets:
+A 3-node cluster for a full run costs a few cents (Hetzner bills hourly:
+cx22 ≈ €0.008/h, cax11 ≈ €0.007/h). Safety nets, strongest first:
 
-- Every resource is labelled `zattera-harness=1` + a creation timestamp.
-- `NewCluster` **reaps** harness resources older than `ZT_CLOUD_MAX_AGE`
-  (default 3h) before each run.
-- Each run destroys its own servers, firewalls, networks, and SSH key on exit.
-- `make cloud-reap` destroys **all** leftover harness resources on demand.
+1. **Use a dedicated, empty Hetzner project** and generate the token there. A
+   Hetzner token is scoped to ONE project and cannot touch any other — this is
+   the guarantee that does not depend on the harness being bug-free.
+2. **Shared-project guard:** `NewCluster` lists the project and **refuses to
+   run** if it finds any server the harness did not create (no
+   `zattera-harness` label). Override only if you understand the blast radius:
+   `ZT_CLOUD_ALLOW_SHARED_PROJECT=1`.
+3. Every resource is labelled `zattera-harness=1` + a creation timestamp; every
+   destroy is scoped to that label — the harness never enumerates-and-deletes
+   unlabelled resources.
+4. `NewCluster` **reaps** harness resources older than `ZT_CLOUD_MAX_AGE`
+   (default 3h); each run destroys its own on exit; `make cloud-reap` destroys
+   all leftover harness resources on demand.
+
+## Scenarios
+
+Each test case is one `*_test.go` file in this package; they share the harness
+(the non-`_test.go` files). Current cases:
+
+| file | test | what it covers |
+|------|------|----------------|
+| `smoke_test.go` | `TestSmoke` | cheapest check: 2-node mixed-arch cluster forms, arch reported |
+| `threenode_test.go` | `TestThreeNodeCluster` | 1 control + 2 workers, all register + ALIVE |
+| `reap_test.go` | `TestCloudReap` | operational: destroy all leftover harness resources |
+
+**Add a scenario:** drop a new `<case>_test.go` with
+
+```go
+//go:build cloud
+
+package cloud
+
+func TestMyCase(t *testing.T) {
+	c := NewCluster(t)                 // gated, reaped, torn down for you
+	control := c.StartControl("amd64", "my.zattera.invalid")
+	w := c.JoinWorker("arm64")
+	c.WaitNodesReady(2)
+	// ... exercise c.Nodes(), w.MustRun(...), c.IsolateInbound(w), w.KillDaemon(), etc.
+}
+```
+
+The harness handles create/install/join, teardown, failure bundles, and the
+keep-on-fail attach kit — a scenario just drives nodes and asserts.
 
 ## Debugging a failing run
 
@@ -85,4 +125,5 @@ Capabilities:
 | `ZT_CLOUD_REGION` | `nbg1` | Hetzner location |
 | `ZT_CLOUD_KEEP` | off | on failure, keep the cluster up + print an attach kit |
 | `ZT_CLOUD_MAX_AGE` | `3h` | reaper max age for harness resources |
+| `ZT_CLOUD_ALLOW_SHARED_PROJECT` | off | disable the guard that refuses to run in a non-dedicated project |
 | `ZT_CLOUD_API` | real API | override the API base URL (tests) |
