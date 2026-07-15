@@ -25,6 +25,8 @@ coverage.html
 .env
 .env.local
 
+node_modules/
+
 PERSONAL.md
 TEST_SERVER.md
 
@@ -32,3 +34,8 @@ TEST_SERVER.md
 /zt
 test/real-cluster/servers.env
 test/real-cluster/.state/
+# docmd build output
+/site/
+
+# wrangler
+.wrangler/

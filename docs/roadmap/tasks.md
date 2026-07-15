@@ -5,6 +5,10 @@ implemented and tested** (see "What already exists"). Work through tasks in
 order; a task may start when its `Depends` are done. Each phase ends with
 something runnable.
 
+> **Status:** tasks marked ✅ **DONE** are complete. This currently covers
+> **T-01 … T-53** (the full M1 milestone) plus **T-89** and **T-90** (production
+> ingress + public API TLS/ACME). Everything else is still open.
+
 ## What already exists (do not rebuild)
 
 - **Protos** (`api/proto/…`, generated code committed in `api/gen/…`):
@@ -94,7 +98,7 @@ Acceptance: commands that must pass
 `zattera projects create demo`, `zattera init`, env vars set/pull, and
 `zattera state export` all work over TLS.
 
-### T-01 — Embedded cluster CA
+### T-01 — Embedded cluster CA  ✅ **DONE**
 Phase 1 · Depends: — · Size: M
 **Files:** `internal/daemon/ca/ca.go`, `ca_test.go`
 **Steps:**
@@ -120,7 +124,7 @@ regenerated CA silently bricks every node's trust).
 `x509.Verify`; SAN contents; CSR signing rejects a CSR with a bad signature.
 **Acceptance:** `go test ./internal/daemon/ca/`
 
-### T-02 — gRPC + gateway server on one TLS port
+### T-02 — gRPC + gateway server on one TLS port  ✅ **DONE**
 Phase 1 · Depends: T-01 · Size: M
 **Files:** `internal/daemon/api/server.go`, `server_test.go`; modify
 `internal/daemon/daemon.go` (wire it)
@@ -151,7 +155,7 @@ agent's long-lived streams (`MinTime: 10s, PermitWithoutStream: true`).
 via HTTPS, make a gRPC health check call over the same port.
 **Acceptance:** `go test ./internal/daemon/api/ -run TestServerDualProtocol`
 
-### T-03 — First-boot bootstrap: org, admin, token, cluster key
+### T-03 — First-boot bootstrap: org, admin, token, cluster key  ✅ **DONE**
 Phase 1 · Depends: — · Size: M
 **Files:** `internal/daemon/bootstrap.go`, `bootstrap_test.go`
 **Steps:**
@@ -179,7 +183,7 @@ at the proposer.
 exist; second run is a no-op; token hash verifies.
 **Acceptance:** `go test ./internal/daemon/ -run TestBootstrap`
 
-### T-04 — AuthService + token auth interceptor
+### T-04 — AuthService + token auth interceptor  ✅ **DONE**
 Phase 1 · Depends: T-02, T-03 · Size: L
 **Files:** `internal/daemon/api/auth.go`, `interceptors.go`,
 `auth_test.go`
@@ -210,7 +214,7 @@ expired token rejected; unknown method denied; node cert reaches Node-tier
 methods; user token cannot call Node-tier.
 **Acceptance:** `go test ./internal/daemon/api/ -run TestAuth`
 
-### T-05 — RBAC + ProjectService
+### T-05 — RBAC + ProjectService  ✅ **DONE**
 Phase 1 · Depends: T-04 · Size: M
 **Files:** `internal/daemon/api/rbac.go`, `projects.go`, `rbac_test.go`
 **Steps:**
@@ -238,7 +242,7 @@ teardown hooks in (scheduler reconciles assignments away when envs vanish).
 not add members, non-member sees no project; name uniqueness.
 **Acceptance:** `go test ./internal/daemon/api/ -run 'TestRBAC|TestProjects'`
 
-### T-06 — AppService: apps, environments, env vars
+### T-06 — AppService: apps, environments, env vars  ✅ **DONE**
 Phase 1 · Depends: T-05 · Size: M
 **Files:** `internal/daemon/api/apps.go`, `apps_test.go`
 **Steps:**
@@ -262,7 +266,7 @@ fields).
 redacted, reveal); ApplyAppConfig creates a preview env.
 **Acceptance:** `go test ./internal/daemon/api/ -run TestApps`
 
-### T-07 — Audit middleware
+### T-07 — Audit middleware  ✅ **DONE**
 Phase 1 · Depends: T-04 · Size: S
 **Files:** `internal/daemon/api/audit.go`, `audit_test.go`; implement
 `AuditServiceServer` here too.
@@ -281,7 +285,7 @@ password (request_summary only for allow-listed message types).
 don't; query filters by method prefix.
 **Acceptance:** `go test ./internal/daemon/api/ -run TestAudit`
 
-### T-08 — Leader-forward interceptor
+### T-08 — Leader-forward interceptor  ✅ **DONE**
 Phase 1 · Depends: T-02 · Size: M
 **Files:** `internal/daemon/api/leaderforward.go`, `leaderforward_test.go`
 **Steps:**
@@ -305,7 +309,7 @@ change (subscribe to `LeaderCh()`).
 lands on leader; forwarded-loop guard trips.
 **Acceptance:** `go test ./internal/daemon/api/ -run TestLeaderForward`
 
-### T-09 — zattera.toml parser + config hash
+### T-09 — zattera.toml parser + config hash  ✅ **DONE**
 Phase 1 · Depends: — · Size: M
 **Files:** `internal/appconfig/appconfig.go`, `appconfig_test.go`,
 `testdata/*.toml`
@@ -332,7 +336,7 @@ defaulting; every validation error case; hash stability (same input twice)
 and sensitivity (any field change → new hash).
 **Acceptance:** `go test ./internal/appconfig/`
 
-### T-10 — CLI: client factory, verified login, projects/apps/env commands, init
+### T-10 — CLI: client factory, verified login, projects/apps/env commands, init  ✅ **DONE**
 Phase 1 · Depends: T-04..T-06, T-09 · Size: L
 **Files:** `internal/cli/client.go`, `projects.go`, `apps.go`, `env.go`,
 `init.go`; modify `internal/cli/cli.go` (register)
@@ -362,7 +366,7 @@ failure path, project create/ls, env round trip, init detection matrix.
 **Acceptance:** `go test ./internal/cli/ -run TestCLI` — and manually:
 `bin/zattera server --dev` + `bin/zattera login && bin/zattera projects create demo`.
 
-### T-11 — State export / apply
+### T-11 — State export / apply  ✅ **DONE**
 Phase 1 · Depends: T-05, T-06 · Size: M
 **Files:** `internal/daemon/api/statesvc.go`, `statesvc_test.go`,
 `internal/cli/state.go`
@@ -386,7 +390,7 @@ are the identity), so apply must be idempotent by name; never export
 apply is idempotent (second run = all "unchanged").
 **Acceptance:** `go test ./internal/daemon/api/ -run TestState`
 
-### T-12 — NodeService + join tokens + `zattera nodes ls`
+### T-12 — NodeService + join tokens + `zattera nodes ls`  ✅ **DONE**
 Phase 1 · Depends: T-04 · Size: S
 **Files:** `internal/daemon/api/nodes.go`, `nodes_test.go`,
 `internal/cli/nodes.go`
@@ -415,7 +419,7 @@ back to zeros with a warning; the CA hash in the token is over the DER bytes
 mesh (hub-and-spoke via the control node), the worker appears in
 `zattera nodes ls` as ALIVE, and cross-node ping over `10.90.0.0/16` works.
 
-### T-13 — Docker ContainerRuntime implementation
+### T-13 — Docker ContainerRuntime implementation  ✅ **DONE**
 Phase 2 · Depends: — · Size: M
 **Files:** `internal/daemon/runtime/docker.go`, `docker_test.go`,
 `test/integration/runtime_test.go`
@@ -455,7 +459,7 @@ path lives in the VM).
 ./test/integration/`; `grep -r "docker/docker" internal/ | grep -v
 daemon/runtime` empty.
 
-### T-14 — Agent skeleton: AgentSync stream + heartbeats
+### T-14 — Agent skeleton: AgentSync stream + heartbeats  ✅ **DONE**
 Phase 2 · Depends: T-02, T-12 · Size: M
 **Files:** `internal/daemon/agent/agent.go`, `sync.go`, `agent_test.go`;
 control side: `internal/daemon/api/agentsync.go`
@@ -488,7 +492,7 @@ hello registers, heartbeat lands in livestate, assignment change pushes a new
 AssignmentSet, disconnect+reconnect resyncs.
 **Acceptance:** `go test ./internal/daemon/agent/ -run TestAgentSync`
 
-### T-15 — Assignment executor (agent reconciler)
+### T-15 — Assignment executor (agent reconciler)  ✅ **DONE**
 Phase 2 · Depends: T-14 · Size: L
 **Files:** `internal/daemon/agent/executor.go`, `executor_test.go`
 **Steps:**
@@ -535,7 +539,7 @@ replace; adoption after restart; pull failure → FAILED status reported,
 retries.
 **Acceptance:** `go test ./internal/daemon/agent/ -run TestExecutor`
 
-### T-16 — Health probes
+### T-16 — Health probes  ✅ **DONE**
 Phase 2 · Depends: T-15 · Size: M
 **Files:** `internal/daemon/agent/health.go`, `health_test.go`
 **Steps:**
@@ -558,7 +562,7 @@ in its own goroutine guarded by the per-instance serial loop).
 (fake clock), flap threshold, exec probe path with fakeruntime.
 **Acceptance:** `go test ./internal/daemon/agent/ -run TestHealth`
 
-### T-17 — Join flow: RPC + client side
+### T-17 — Join flow: RPC + client side  ✅ **DONE**
 Phase 2 · Depends: T-01, T-12 · Size: L
 **Files:** `internal/daemon/api/join.go`, `join_test.go`; client side in
 `internal/daemon/join.go`; modify `internal/daemon/daemon.go`
@@ -596,7 +600,7 @@ mesh IP allocated); expired/used token rejected; CA-pin mismatch client
 error.
 **Acceptance:** `go test ./internal/daemon/api/ -run TestJoin`
 
-### T-18 — WireGuard device manager
+### T-18 — WireGuard device manager  ✅ **DONE**
 Phase 2 · Depends: — · Size: L
 **Files:** `internal/daemon/mesh/device.go`, `device_linux.go`,
 `device_darwin.go`, `kernel_linux.go`, `uapi.go`, `device_test.go`,
@@ -635,7 +639,7 @@ over tunnel IPs.
 **Acceptance:** `go test ./internal/daemon/mesh/`; integration job green in
 CI (`go test -tags integration -run TestWGDevice ./test/integration/`).
 
-### T-19 — Peer distribution + hub-and-spoke (Phase A)
+### T-19 — Peer distribution + hub-and-spoke (Phase A)  ✅ **DONE**
 Phase 2 · Depends: T-17, T-18 · Size: M
 **Files:** `internal/daemon/api/meshsvc.go`, `internal/daemon/mesh/peersync.go`,
 `meshsvc_test.go`; modify `internal/daemon/daemon.go`
@@ -661,7 +665,7 @@ entirely.
 control sees all /32; NAT keepalive set exactly when no public endpoint.
 **Acceptance:** `go test ./internal/daemon/api/ -run TestPeerSets`
 
-### T-20 — Disco (STUN-lite) + direct worker↔worker peering (Phase B)
+### T-20 — Disco (STUN-lite) + direct worker↔worker peering (Phase B)  ✅ **DONE**
 Phase 2 · Depends: T-19 · Size: L
 **Files:** `internal/daemon/mesh/disco.go`, `disco_test.go`; extend
 `meshsvc.go` peer builder
@@ -689,7 +693,7 @@ survive (do not remove control peers' /16).
 with endpoints get direct /32 peers AND keep hub route.
 **Acceptance:** `go test ./internal/daemon/mesh/ -run TestDisco`
 
-### T-21 — Node liveness from heartbeats
+### T-21 — Node liveness from heartbeats  ✅ **DONE**
 Phase 2 · Depends: T-14 · Size: S
 **Files:** `internal/daemon/api/liveness.go`, `liveness_test.go`
 **Steps:**
@@ -706,7 +710,7 @@ failover false-positive trap — test it with fake clock.
 grace respected.
 **Acceptance:** `go test ./internal/daemon/api/ -run TestLiveness`
 
-### T-22 — Two-node join integration rig
+### T-22 — Two-node join integration rig  ✅ **DONE**
 Phase 2 · Depends: T-17, T-19 · Size: M
 **Files:** `test/integration/twonode_test.go`, `test/integration/rig.go`
 **Steps:**
@@ -739,7 +743,7 @@ containers (`--rm` + explicit kill).
 `zattera rollback` restores the previous release in <5s; killing the fake
 node in simcluster reschedules stateless replicas.
 
-### T-23 — Scheduler evaluation loop
+### T-23 — Scheduler evaluation loop  ✅ **DONE**
 Phase 3 · Depends: T-15 · Size: L
 **Files:** `internal/daemon/scheduler/scheduler.go`, `scheduler_test.go`
 **Steps:**
@@ -774,7 +778,7 @@ replacement assignments on live node, no double-placement across repeated
 evaluations.
 **Acceptance:** `go test ./internal/daemon/scheduler/ -run TestEvaluate`
 
-### T-24 — Placement: filters + spread scoring
+### T-24 — Placement: filters + spread scoring  ✅ **DONE**
 Phase 3 · Depends: — · Size: M
 **Files:** `internal/daemon/scheduler/placement.go`, `placement_test.go`
 **Steps:**
@@ -796,7 +800,7 @@ placing on failed candidates.
 spread across 3 nodes for 3 replicas, volume pinning, deterministic output.
 **Acceptance:** `go test ./internal/daemon/scheduler/ -run TestPlacement`
 
-### T-25 — Deploy API: releases from image refs
+### T-25 — Deploy API: releases from image refs  ✅ **DONE**
 Phase 3 · Depends: T-06, T-09 · Size: M
 **Files:** `internal/daemon/api/deploy.go`, `deploy_test.go`
 **Steps:**
@@ -820,7 +824,7 @@ entirely (BUILDING phase never entered).
 rollback targets previous.
 **Acceptance:** `go test ./internal/daemon/api/ -run TestDeploy`
 
-### T-26 — Red/green Deployment orchestrator
+### T-26 — Red/green Deployment orchestrator  ✅ **DONE**
 Phase 3 · Depends: T-23, T-16, T-25 · Size: L
 **Files:** `internal/daemon/scheduler/deployment.go`, `deployment_test.go`
 **Steps:**
@@ -862,7 +866,7 @@ happy path phase walk; health failure → FAILED, blue untouched; rollback
 within window is instant; supersede; drain reaps blue after 10m.
 **Acceptance:** `go test ./internal/daemon/scheduler/ -run TestDeployment`
 
-### T-27 — Environment/app deletion teardown
+### T-27 — Environment/app deletion teardown  ✅ **DONE**
 Phase 3 · Depends: T-23 · Size: S
 **Files:** `internal/daemon/scheduler/teardown.go`, `teardown_test.go`
 **Steps:**
@@ -874,7 +878,7 @@ Phase 3 · Depends: T-23 · Size: S
 removed within two evaluations.
 **Acceptance:** `go test ./internal/daemon/scheduler/ -run TestTeardown`
 
-### T-28 — CLI: deploy --image, ps, releases, rollback
+### T-28 — CLI: deploy --image, ps, releases, rollback  ✅ **DONE**
 Phase 3 · Depends: T-25, T-10 · Size: M
 **Files:** `internal/cli/deploy.go`, `ps.go`, `releases.go`, `rollback.go`
 **Steps:**
@@ -898,7 +902,7 @@ the agent executor + health prober with fakeruntime in the test daemon
 harness; add `internal/daemon/testharness` helper if needed — document it).
 **Acceptance:** `go test ./internal/cli/ -run TestDeployCLI`
 
-### T-29 — Node drain & remove
+### T-29 — Node drain & remove  ✅ **DONE**
 Phase 3 · Depends: T-23 · Size: M
 **Files:** `internal/daemon/api/nodes.go` (extend), `internal/cli/nodes.go`
 (extend), `internal/daemon/scheduler/drain_test.go`
@@ -920,7 +924,7 @@ failover mid-drain).
 stateful stopped with event, node reaches DRAINED.
 **Acceptance:** `go test ./internal/daemon/scheduler/ -run TestDrain`
 
-### T-30 — Chaos suite: scheduler + deployment invariants
+### T-30 — Chaos suite: scheduler + deployment invariants  ✅ **DONE**
 Phase 3 · Depends: T-26, T-29 · Size: M
 **Files:** `test/chaos/deployment_test.go`, `test/chaos/scheduler_test.go`,
 `test/chaos/harness.go`
@@ -967,7 +971,7 @@ architecture the release does not support.
 - Builds (T-33/T-35) target multiple platforms and push ONE image index; the
   registry (T-32) stores/serves image indexes and refcounts through them.
 
-### T-31 — Registry: CAS blob store + OCI push protocol
+### T-31 — Registry: CAS blob store + OCI push protocol  ✅ **DONE**
 Phase 4 · Depends: T-02 · Size: M
 **Files:** `internal/daemon/registry/blobstore.go`, `uploads.go`,
 `httpapi.go`, `blobstore_test.go`, `uploads_test.go`
@@ -995,7 +999,7 @@ mismatch rejection, crash-safety (partial tmp file, restart, no corrupt
 blob).
 **Acceptance:** `go test ./internal/daemon/registry/`
 
-### T-32 — Registry: manifests, tags, pull, auth, GC
+### T-32 — Registry: manifests, tags, pull, auth, GC  ✅ **DONE**
 Phase 4 · Depends: T-31 · Size: M
 **Files:** `internal/daemon/registry/manifests.go`, `auth.go`, `gc.go`,
 `manifests_test.go`, `test/integration/registry_test.go`
@@ -1047,7 +1051,7 @@ tests).
 **Acceptance:** `go test ./internal/daemon/registry/`;
 `go test -tags integration -run TestRegistryPushPull ./test/integration/`
 
-### T-33 — Builder: managed buildkitd + Dockerfile builds
+### T-33 — Builder: managed buildkitd + Dockerfile builds  ✅ **DONE**
 Phase 4 · Depends: T-13, T-32 · Size: L
 **Files:** `internal/daemon/builder/buildkit.go`, `dockerfile.go`,
 `builder_test.go`, `test/integration/build_test.go`
@@ -1103,7 +1107,7 @@ behind a `TestDockerfileBuildEmulated` name).
 **Acceptance:** `go test ./internal/daemon/builder/`;
 `go test -tags integration -run TestDockerfileBuild ./test/integration/`
 
-### T-34 — Nixpacks build path
+### T-34 — Nixpacks build path  ✅ **DONE**
 Phase 4 · Depends: T-33 · Size: M
 **Files:** `internal/daemon/builder/nixpacks.go`, `nixpacks_test.go`
 **Steps:**
@@ -1127,7 +1131,7 @@ builds via nixpacks → runs.
 **Acceptance:** `go test -tags integration -run TestNixpacksBuild
 ./test/integration/`
 
-### T-35 — Build pipeline: queue, dispatch, source upload, logs
+### T-35 — Build pipeline: queue, dispatch, source upload, logs  ✅ **DONE**
 Phase 4 · Depends: T-33, T-25 · Size: L
 **Files:** `internal/daemon/scheduler/builds.go`,
 `internal/daemon/api/upload.go`, `internal/daemon/agent/buildserver.go`,
@@ -1177,7 +1181,7 @@ this task).
 succeed; builder-lost timeout; deployment gating on build.
 **Acceptance:** `go test ./internal/daemon/scheduler/ -run TestBuilds`
 
-### T-36 — CLI: deploy from source (the Vercel moment)
+### T-36 — CLI: deploy from source (the Vercel moment)  ✅ **DONE**
 Phase 4 · Depends: T-35, T-28 · Size: M
 **Files:** `internal/cli/deploy.go` (extend), `internal/cli/tar.go`
 **Steps:**
@@ -1196,7 +1200,7 @@ tar must set deterministic uid/gid=0 and strip xattrs (portability).
 T-54.
 **Acceptance:** `go test ./internal/cli/ -run TestDeploySource`
 
-### T-37 — GitHub push-to-deploy
+### T-37 — GitHub push-to-deploy  ✅ **DONE**
 Phase 4 · Depends: T-35 · Size: L
 **Files:** `internal/daemon/github/webhook.go`, `app.go`, `webhook_test.go`,
 `internal/daemon/api/githubroutes.go`, `internal/cli/github.go`
@@ -1225,7 +1229,7 @@ debug).
 mapping, dedupe; integration optional (needs real GitHub — skip).
 **Acceptance:** `go test ./internal/daemon/github/`
 
-### T-38 — Release retention → registry GC
+### T-38 — Release retention → registry GC  ✅ **DONE**
 Phase 4 · Depends: T-32, T-26 · Size: S
 **Files:** `internal/daemon/scheduler/retention.go`, `retention_test.go`
 **Steps:**
@@ -1337,7 +1341,7 @@ failure → empty platforms, deploy still succeeds.
 **Exit criterion:** the E2E smoke test (T-54) is green: source deploy →
 HTTPS URL serves → red/green visible → rollback <5s → clean teardown.
 
-### T-39 — Route builder + RouteStream
+### T-39 — Route builder + RouteStream  ✅ **DONE**
 Phase 5 · Depends: T-26 · Size: L
 **Files:** `internal/daemon/scheduler/routes.go`,
 `internal/daemon/api/routesvc.go`, `routes_test.go`
@@ -1374,7 +1378,7 @@ atomically), unhealthy endpoint dropped, domain added, node down;
 routeclient disk round-trip.
 **Acceptance:** `go test ./internal/daemon/scheduler/ -run TestRoutes`
 
-### T-40 — Logstore: segments + follow
+### T-40 — Logstore: segments + follow  ✅ **DONE**
 Phase 5 · Depends: — · Size: L
 **Files:** `internal/daemon/logstore/segmented.go`, `segment.go`,
 `segmented_test.go`
@@ -1402,7 +1406,7 @@ filtering, follow receives live lines, retention deletes oldest, crash-safe
 recovery (kill between rotate steps simulated by calling internals).
 **Acceptance:** `go test ./internal/daemon/logstore/`
 
-### T-41 — Log fan-out + `zattera logs -f`
+### T-41 — Log fan-out + `zattera logs -f`  ✅ **DONE**
 Phase 5 · Depends: T-40, T-35 · Size: M
 **Files:** `internal/daemon/api/logsvc.go`, `internal/cli/logs.go`,
 `logsvc_test.go`
@@ -1423,7 +1427,7 @@ different rates without unbounded buffering (bounded per-stream lookahead).
 partial result, since/limit filters.
 **Acceptance:** `go test ./internal/daemon/api/ -run TestLogFanout`
 
-### T-42 — L7 proxy core
+### T-42 — L7 proxy core  ✅ **DONE**
 Phase 5 · Depends: T-39 · Size: L
 **Files:** `internal/daemon/proxy/l7.go`, `lb.go`, `middleware.go`,
 `l7_test.go`
@@ -1454,7 +1458,7 @@ source client); in-flight decrement in defer (panics must not leak counters).
 allowlist 403, redirect 308, gzip), websocket echo.
 **Acceptance:** `go test ./internal/daemon/proxy/ -run TestL7`
 
-### T-42-bis — Sticky sessions (cookie affinity)
+### T-42-bis — Sticky sessions (cookie affinity)  ✅ **DONE**
 Phase 5 · Depends: T-42 · Size: S
 **Files:** `internal/daemon/proxy/sticky.go`, `internal/daemon/proxy/l7.go`
 (extend endpoint selection), `sticky_test.go`
@@ -1481,7 +1485,7 @@ cookie names a now-unhealthy endpoint fails over and re-pins; no `Set-Cookie`
 on non-sticky routes.
 **Acceptance:** `go test ./internal/daemon/proxy/ -run TestSticky`
 
-### T-43 — L4 TCP proxy
+### T-43 — L4 TCP proxy  ✅ **DONE**
 Phase 5 · Depends: T-39 · Size: M
 **Files:** `internal/daemon/proxy/l4.go`, `l4_test.go`
 **Steps:**
@@ -1500,7 +1504,7 @@ port add/remove on snapshot swap without dropping the untouched port's
 connections.
 **Acceptance:** `go test ./internal/daemon/proxy/ -run TestL4`
 
-### T-44 — ACME via certmagic + raft storage
+### T-44 — ACME via certmagic + raft storage  ✅ **DONE**
 Phase 5 · Depends: T-39, T-42 · Size: L
 **Files:** `internal/daemon/tlsmgr/tlsmgr.go`, `storage.go`,
 `storage_test.go`, `tlsmgr_test.go`
@@ -1529,7 +1533,7 @@ self-signed test CA is overkill — test the decision func and dev-mode cert
 issuance path.
 **Acceptance:** `go test ./internal/daemon/tlsmgr/`
 
-### T-45 — DomainService + cluster subdomains
+### T-45 — DomainService + cluster subdomains  ✅ **DONE**
 Phase 5 · Depends: T-39, T-44 · Size: S
 **Files:** `internal/daemon/api/domains.go`, `internal/cli/domains.go`,
 `domains_test.go`
@@ -1545,7 +1549,7 @@ Phase 5 · Depends: T-39, T-44 · Size: S
 **Tests:** unit — CRUD + collision + middleware set.
 **Acceptance:** `go test ./internal/daemon/api/ -run TestDomains`
 
-### T-46 — Per-(project,env) networks + subnet allocation
+### T-46 — Per-(project,env) networks + subnet allocation  ✅ **DONE**
 Phase 5 · Depends: T-15 · Size: M
 **Files:** `internal/daemon/agent/networks.go`, `networks_test.go`; extend
 executor
@@ -1571,7 +1575,7 @@ inspect-first.
 network+DNS into the ContainerSpec (fakeruntime asserts).
 **Acceptance:** `go test ./internal/daemon/agent/ -run TestNetworks`
 
-### T-47 — Internal DNS resolver (F26)
+### T-47 — Internal DNS resolver (F26)  ✅ **DONE**
 Phase 5 · Depends: T-39, T-46 · Size: L
 **Files:** `internal/daemon/intdns/resolver.go`, `resolver_test.go`
 **Steps:**
@@ -1595,7 +1599,7 @@ NXDOMAIN, staging≠production), forwarding fallback with a fake upstream,
 shorthand.
 **Acceptance:** `go test ./internal/daemon/intdns/`
 
-### T-48 — VIP L4 proxy (internal service traffic)
+### T-48 — VIP L4 proxy (internal service traffic)  ✅ **DONE**
 Phase 5 · Depends: T-47, T-43 · Size: M
 **Files:** `internal/daemon/intdns/vipproxy.go`, `vipproxy_test.go`;
 control-side VIP allocation in `internal/daemon/scheduler/vips.go`
@@ -1615,7 +1619,7 @@ ports: v1 = TCP only, log-and-skip UDP InternalPorts (documented limitation).
 T-43 is already tested.
 **Acceptance:** `go test ./internal/daemon/intdns/ -run TestVIP`
 
-### T-49 — Exec/attach, top, fs, port-forward
+### T-49 — Exec/attach, top, fs, port-forward  ✅ **DONE**
 Phase 5 · Depends: T-35 (agent server), T-13 · Size: L
 **Files:** `internal/daemon/api/execsvc.go`,
 `internal/daemon/agent/execserver.go`, `internal/cli/attach.go`,
@@ -1646,7 +1650,7 @@ fakeruntime Exec (echo bytes both ways, exit code propagation); port-forward
 round trip against a local TCP echo behind the fake.
 **Acceptance:** `go test ./internal/daemon/api/ -run TestExec`
 
-### T-50 — Env var injection + config-hash redeploys
+### T-50 — Env var injection + config-hash redeploys  ✅ **DONE**
 Phase 5 · Depends: T-15, T-06 · Size: S
 **Files:** `internal/daemon/api/agentsync.go` (extend), `internal/daemon/scheduler/scheduler.go` (extend)
 **Steps:**
@@ -1659,7 +1663,7 @@ Phase 5 · Depends: T-15, T-06 · Size: S
 var changes.
 **Acceptance:** `go test ./internal/daemon/api/ -run TestEnvInjection`
 
-### T-51 — `zattera stats` minimal (live from heartbeats)
+### T-51 — `zattera stats` minimal (live from heartbeats)  ✅ **DONE**
 Phase 5 · Depends: T-14 · Size: S
 **Files:** `internal/daemon/api/metricssvc.go`, `internal/cli/stats.go`
 **Steps:**
@@ -1669,7 +1673,7 @@ Phase 5 · Depends: T-14 · Size: S
 2. CLI `zattera stats [--nodes|--app]` table.
 **Acceptance:** `go test ./internal/daemon/api/ -run TestStatsLive`
 
-### T-52 — Dev-mode polish for single node
+### T-52 — Dev-mode polish for single node  ✅ **DONE**
 Phase 5 · Depends: T-44, T-42 · Size: S
 **Files:** `internal/daemon/daemon.go` (extend), `internal/daemon/devmode.go`
 **Steps:**
@@ -1683,7 +1687,7 @@ Phase 5 · Depends: T-44, T-42 · Size: S
 `DEVBANNER:` prefixed machine-readable lines alongside the pretty block).
 **Acceptance:** manual boot + updated unit snapshot of the banner.
 
-### T-53 — Jobs: one-shot runs (M1 subset)
+### T-53 — Jobs: one-shot runs (M1 subset)  ✅ **DONE**
 Phase 5 · Depends: T-23, T-40 · Size: M
 **Files:** `internal/daemon/scheduler/jobs.go`, `internal/daemon/api/jobs.go`,
 `internal/cli/jobs.go`, `jobs_test.go`
@@ -1742,7 +1746,7 @@ two tasks complete the *production* daemon wiring so a non-dev node actually
 serves apps on `:80`/`:443` with real certificates, and so the CLI no longer
 needs the cluster CA out-of-band.
 
-### T-89 — Production ingress listeners (`:80`/`:443` + ACME)
+### T-89 — Production ingress listeners (`:80`/`:443` + ACME)  ✅ **DONE**
 Phase 5.1 · Depends: T-39, T-42, T-43, T-44 · Size: M
 **Files:** `internal/daemon/ingresswiring.go` (extend),
 `internal/daemon/daemon.go` (extend), `ingresswiring_test.go`
@@ -1771,7 +1775,7 @@ binds both listeners against an injected fake; dev path unchanged.
 **Acceptance:** `go test ./internal/daemon/ -run TestIngress`; manual: a public
 node serves `https://<app>-<env>.<domain>/` with a Let's Encrypt cert.
 
-### T-90 — Public API TLS: ACME for the API + CLI CA trust-on-first-use
+### T-90 — Public API TLS: ACME for the API + CLI CA trust-on-first-use  ✅ **DONE**
 Phase 5.1 · Depends: T-44, T-17 · Size: M
 **Files:** `internal/daemon/api/server.go` (extend),
 `internal/daemon/daemon.go` (extend), `internal/cli/cli.go` (login extend),

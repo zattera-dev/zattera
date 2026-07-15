@@ -1,0 +1,119 @@
+{
+  "title": "Zattera",
+  "url": "https://zattera.dev",
+  "src": "docs",
+  "out": "site",
+  "engine": "js",
+  "autoTitleFromH1": true,
+  "copyCode": true,
+  "pageNavigation": true,
+  "layout": {
+    "spa": true,
+    "sidebar": {
+      "collapsible": true,
+      "defaultCollapsed": false
+    }
+  },
+  "theme": {
+    "name": "default",
+    "appearance": "system",
+    "codeHighlight": true
+  },
+  "navigation": [
+    { "title": "Home", "path": "/", "icon": "home" },
+    {
+      "title": "Getting Started",
+      "icon": "rocket",
+      "children": [
+        { "title": "Quickstart", "path": "/getting-started/quickstart/", "icon": "zap" }
+      ]
+    },
+    {
+      "title": "Setup",
+      "icon": "settings",
+      "children": [
+        { "title": "Installation", "path": "/setup/installation/", "icon": "download" },
+        { "title": "Configuration", "path": "/setup/configuration/", "icon": "file-cog" },
+        { "title": "Nodes", "path": "/setup/nodes/", "icon": "server" },
+        { "title": "High availability · WIP", "path": "/setup/high-availability/", "icon": "shield" },
+        { "title": "Node autoprovisioning · WIP", "path": "/setup/node-autoprovisioning/", "icon": "cloud" }
+      ]
+    },
+    {
+      "title": "CLI",
+      "icon": "terminal",
+      "children": [
+        { "title": "Overview", "path": "/cli/", "icon": "book-open" },
+        { "title": "Command reference", "path": "/cli/reference/", "icon": "list" }
+      ]
+    },
+    {
+      "title": "Deploy",
+      "icon": "rocket",
+      "children": [
+        { "title": "Deploying", "path": "/deploy/", "icon": "play" },
+        { "title": "zattera.toml", "path": "/deploy/zattera-toml/", "icon": "file-text" },
+        { "title": "Builds & registry", "path": "/deploy/builds/", "icon": "package" },
+        { "title": "Environment variables", "path": "/deploy/environment-variables/", "icon": "key" },
+        { "title": "Custom domains", "path": "/deploy/custom-domains/", "icon": "globe" },
+        { "title": "GitHub push-to-deploy", "path": "/deploy/github/", "icon": "github" },
+        { "title": "Preview environments · WIP", "path": "/deploy/preview-environments/", "icon": "git-pull-request" }
+      ]
+    },
+    {
+      "title": "Networking",
+      "icon": "network",
+      "children": [
+        { "title": "Ingress & load balancing", "path": "/networking/ingress/", "icon": "arrow-down-to-line" },
+        { "title": "Internal DNS", "path": "/networking/internal-dns/", "icon": "at-sign" },
+        { "title": "WireGuard mesh", "path": "/networking/mesh/", "icon": "share-2" }
+      ]
+    },
+    {
+      "title": "Operations",
+      "icon": "activity",
+      "children": [
+        { "title": "Logs", "path": "/operations/logs/", "icon": "scroll-text" },
+        { "title": "Jobs & cron", "path": "/operations/jobs/", "icon": "timer" },
+        { "title": "Remote debugging", "path": "/operations/remote-debug/", "icon": "bug" },
+        { "title": "Access control & audit", "path": "/operations/access-control/", "icon": "lock" },
+        { "title": "State export & apply", "path": "/operations/state-export/", "icon": "file-down" },
+        { "title": "Metrics & alerts · WIP", "path": "/operations/metrics-and-alerts/", "icon": "bar-chart" }
+      ]
+    },
+    {
+      "title": "Data",
+      "icon": "database",
+      "children": [
+        { "title": "Volumes · WIP", "path": "/data/volumes/", "icon": "hard-drive" },
+        { "title": "Backup & DR · WIP", "path": "/data/backup-restore/", "icon": "life-buoy" }
+      ]
+    },
+    {
+      "title": "Scaling",
+      "icon": "trending-up",
+      "children": [
+        { "title": "Autoscaling · WIP", "path": "/scaling/autoscaling/", "icon": "gauge" },
+        { "title": "Scale to zero · WIP", "path": "/scaling/scale-to-zero/", "icon": "moon" }
+      ]
+    },
+    { "title": "Roadmap", "path": "/roadmap/tasks/", "icon": "map" },
+    {
+      "title": "Contributing",
+      "icon": "users",
+      "children": [
+        { "title": "Overview", "path": "/contributing/", "icon": "book-open" },
+        {
+          "title": "Architecture Decision Records",
+          "icon": "file-text",
+          "children": [
+            { "title": "ADR-0001 · In-house OCI registry", "path": "/contributing/architecture-decision-records/0001-in-house-oci-registry/" },
+            { "title": "ADR-0002 · Inverted build tags", "path": "/contributing/architecture-decision-records/0002-inverted-build-tags/" },
+            { "title": "ADR-0003 · Mesh NAT traversal phasing", "path": "/contributing/architecture-decision-records/0003-mesh-nat-traversal-phasing/" },
+            { "title": "ADR-0004 · In-memory FSM state", "path": "/contributing/architecture-decision-records/0004-in-memory-fsm-state/" }
+          ]
+        }
+      ]
+    }
+  ]
+}

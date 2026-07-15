@@ -8,7 +8,7 @@
 
 _Zattera is Italian for "raft". Fitting: it floats on Raft consensus._
 
-[zattera.dev](https://zattera.dev) · [Docs](https://zattera.dev/docs) · [Quickstart](https://zattera.dev/docs/getting-started/quickstart)
+[zattera.dev](https://zattera.dev) · [Docs](https://zattera.dev) · [Quickstart](https://zattera.dev/getting-started/quickstart)
 
 ![Status](https://img.shields.io/badge/status-pre--alpha-orange)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
@@ -19,9 +19,9 @@ _Zattera is Italian for "raft". Fitting: it floats on Raft consensus._
 
 ---
 
-You have machines: a bare-metal box, a couple of VPSes, maybe the server humming under your desk. What you *don't* have is a weekend to spend wiring together Kubernetes, Traefik, certbot, a registry, and a Postgres just to deploy your app.
+You have machines: a bare-metal box, a couple of VPSes, maybe the server humming under your desk. What you _don't_ have is a weekend to spend wiring together Kubernetes, Traefik, certbot, a registry, and a Postgres just to deploy your app.
 
-Zattera is **one Go binary** that *is* the CLI, the control plane, the scheduler, the proxy, the cert manager, and the registry. Your servers need Docker. That's it. That's the whole dependency list.
+Zattera is **one Go binary** that _is_ the CLI, the control plane, the scheduler, the proxy, the cert manager, and the registry. Your servers need Docker. That's it. That's the whole dependency list.
 
 ## From zero to deployed in four commands
 
@@ -56,7 +56,7 @@ No YAML. No panel to install. No cloud account. Your metal, your platform.
 Every self-hosting tool today forces a trade-off:
 
 - **Web panels on Docker** (Coolify, Dokploy) — friendly, but no real multi-server orchestration underneath.
-- **Bare deploy CLIs** (Kamal) — minimal, but scheduling, state, and failover are *your* problem.
+- **Bare deploy CLIs** (Kamal) — minimal, but scheduling, state, and failover are _your_ problem.
 - **"Just run Kubernetes first"** (Kubero, Cozystack) — the full cloud experience, if you staff a platform team.
 
 Zattera takes the quadrant nobody claimed: **real multi-server orchestration with zero platform dependencies.**
@@ -75,7 +75,7 @@ That means a long list of things you'll never install, configure, or debug at 3 
 - 🌍 **Nodes anywhere** — WireGuard mesh + gossip make multi-region, multi-cloud, and NAT'd home servers first-class citizens. Start with **one node**; grow with a single `--join`; drain and remove freely.
 - 📦 **Deploy anything** — Nixpacks auto-detection or your Dockerfile, built on your own builders, stored in the embedded registry. No Docker Hub required.
 - ⚡ **Vercel-style flow** — `zattera deploy --prod`, GitHub push-to-deploy, staging/production/preview environments, env vars & secrets, custom domains with automatic Let's Encrypt.
-- 🔄 **Red/green releases** — the new version must be fully healthy *before* traffic switches. Rollback is instant; the previous release stays warm.
+- 🔄 **Red/green releases** — the new version must be fully healthy _before_ traffic switches. Rollback is instant; the previous release stays warm.
 - 📈 **Scale** — replica autoscaling, cross-node load balancing, scale-to-zero with wake-on-request, serverless concurrency mode.
 - 🔒 **Internal DNS** — services talk cross-node via `db.production.myproject.internal` over the encrypted mesh. Staging never sees production.
 - 💾 **Stateful apps** — volumes pinned to nodes for Postgres/Redis/…, browsable from the CLI, snapshotted to S3.
@@ -164,22 +164,22 @@ That means a long list of things you'll never install, configure, or debug at 3 
 
 ## What Zattera deliberately doesn't do
 
-The subtraction *is* the product. Every row below is a deliberate "no":
+The subtraction _is_ the product. Every row below is a deliberate "no":
 
-| Doesn't do                      | Who typically does         | Why Zattera skips it                             |
-| ------------------------------- | -------------------------- | ------------------------------------------------ |
-| Run Kubernetes                  | Kubero, Cozystack, Devtron | No etcd/CNI/CSI/Ingress zoo, no YAML sprawl      |
-| Multi-container pods / sidecars | Kubernetes                 | One container per service instance               |
-| Service mesh / network policies | Istio, Linkerd, K8s        | Complexity far exceeds typical app-deploy needs  |
-| Operators / CRDs / plugins      | K8s ecosystem              | No extension sprawl                              |
-| Docker Swarm orchestration      | Dokploy, CapRover          | Weak for cross-region/NAT; maintenance mode      |
-| General-purpose orchestrator    | Nomad, K8s                 | App platform, not a generic scheduler            |
-| Web GUI on servers              | Coolify, Dokploy, CapRover | CLI + API first; no 2 GB panel on every host     |
-| 280+ one-click app templates    | Coolify, CapRover          | Maintenance treadmill; docs/recipes instead      |
-| Separate Traefik/Nginx/certbot  | Coolify, Dokploy, CapRover | Proxy + ACME in-process                          |
-| External DB for the platform    | Coolify (Postgres+Redis)   | Control plane shouldn't die when its DB dies     |
-| Distributed volume replication  | Longhorn, Ceph             | Honest RPO via snapshots, not fake HA            |
-| Vendor-hosted builds/images     | Vercel, Railway, Fly       | Builds and images stay on your metal             |
+| Doesn't do                      | Who typically does         | Why Zattera skips it                            |
+| ------------------------------- | -------------------------- | ----------------------------------------------- |
+| Run Kubernetes                  | Kubero, Cozystack, Devtron | No etcd/CNI/CSI/Ingress zoo, no YAML sprawl     |
+| Multi-container pods / sidecars | Kubernetes                 | One container per service instance              |
+| Service mesh / network policies | Istio, Linkerd, K8s        | Complexity far exceeds typical app-deploy needs |
+| Operators / CRDs / plugins      | K8s ecosystem              | No extension sprawl                             |
+| Docker Swarm orchestration      | Dokploy, CapRover          | Weak for cross-region/NAT; maintenance mode     |
+| General-purpose orchestrator    | Nomad, K8s                 | App platform, not a generic scheduler           |
+| Web GUI on servers              | Coolify, Dokploy, CapRover | CLI + API first; no 2 GB panel on every host    |
+| 280+ one-click app templates    | Coolify, CapRover          | Maintenance treadmill; docs/recipes instead     |
+| Separate Traefik/Nginx/certbot  | Coolify, Dokploy, CapRover | Proxy + ACME in-process                         |
+| External DB for the platform    | Coolify (Postgres+Redis)   | Control plane shouldn't die when its DB dies    |
+| Distributed volume replication  | Longhorn, Ceph             | Honest RPO via snapshots, not fake HA           |
+| Vendor-hosted builds/images     | Vercel, Railway, Fly       | Builds and images stay on your metal            |
 
 ## How it compares
 
@@ -223,7 +223,7 @@ Multi-container pods, service mesh, plugins/CRDs, template catalogs, Windows con
 
 ## Contributing
 
-Design discussions happen in Issues/Discussions; architecture decisions are recorded as [ADRs](./docs/contributing/architecture-decision-records/). Dev setup lives in [CONTRIBUTING.md](./CONTRIBUTING.md).
+Design discussions happen in Issues/Discussions; architecture decisions are recorded as [ADRs](./docs/contributing/architecture-decision-records/). Dev setup lives in [CONTRIBUTING.md](./docs/contributing/index.md).
 
 ## License
 

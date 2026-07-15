@@ -1,3 +1,8 @@
+---
+title: Contributing
+description: Dev setup, ground rules, and the implementation plan for contributing to Zattera.
+---
+
 # Contributing to Zattera
 
 ## Dev setup
@@ -29,7 +34,7 @@ Run a dev server: `bin/zattera server --dev --data-dir /tmp/zattera-dev`.
 - CLI code never imports `internal/daemon` and vice versa (ADR-0002); the
   shared surface is `pkg/apiclient` + generated protos.
 - Architecture decisions are recorded in
-  `docs/contributing/architecture-decision-records/`.
+  [`architecture-decision-records/`](architecture-decision-records/).
 
 ## macOS caveat
 
@@ -39,5 +44,6 @@ features. Their integration tests run inside privileged Linux containers
 
 ## Implementation plan
 
-The dependency-ordered implementation plan lives in [TASKS.md](./TASKS.md).
-Pick the first unclaimed task whose dependencies are done.
+The dependency-ordered implementation plan lives in
+[the roadmap](../roadmap/tasks). Pick the first unclaimed task whose
+dependencies are done.

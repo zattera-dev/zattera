@@ -1,0 +1,22 @@
+{
+  "private": true,
+  "scripts": {
+    "docs:build": "docmd build",
+    "docs:dev": "docmd dev"
+  },
+  "devDependencies": {
+    "@docmd/core": "0.8.13",
+    "wrangler": "^4.111.0"
+  },
+  "dependencies": {
+    "@docmd/plugin-analytics": "^0.8.13",
+    "@docmd/plugin-git": "^0.8.13",
+    "@docmd/plugin-llms": "^0.8.13",
+    "@docmd/plugin-mermaid": "^0.8.13",
+    "@docmd/plugin-okf": "^0.8.13",
+    "@docmd/plugin-openapi": "^0.8.13",
+    "@docmd/plugin-search": "^0.8.13",
+    "@docmd/plugin-seo": "^0.8.13",
+    "@docmd/plugin-sitemap": "^0.8.13"
+  }
+}

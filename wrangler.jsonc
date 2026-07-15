@@ -1,0 +1,15 @@
+{
+  // Static documentation site (docmd build output in ./site) served by
+  // Cloudflare Workers Static Assets. No Worker script — assets-only.
+  "name": "zattera-docs",
+  "compatibility_date": "2025-06-01",
+  "assets": {
+    "directory": "./site",
+    "not_found_handling": "404-page"
+  },
+  // Serve the docs at the apex. custom_domain=true makes wrangler manage the
+  // DNS record + edge certificate for zattera.dev in the existing zone.
+  "routes": [
+    { "pattern": "zattera.dev", "custom_domain": true }
+  ]
+}
