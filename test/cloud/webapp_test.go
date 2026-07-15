@@ -70,7 +70,9 @@ name = "hello"
 type = "dockerfile"
 
 [deploy]
-healthcheck = { path = "/healthz", timeout = "5s" }
+# Generous grace: on small/busy real nodes (1-vCPU, fresh off a buildkit
+# build) a replica can take a while to answer its first healthcheck.
+healthcheck = { path = "/healthz", timeout = "5s", grace_period = "180s" }
 
 [env.production]
 min_replicas = %d
