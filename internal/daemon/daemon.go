@@ -340,7 +340,7 @@ func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store
 		Listen:            cfg.API.Listen,
 		Logger:            log,
 		DNSNames:          serverDNSNames(cfg),
-		IPs:               serverIPs(cfg),
+		IPs:               serverIPs(meshIP),
 		AuthService:       api.NewAuthServer(st, rs, clk, cfg.Domain),
 		ProjectService:    api.NewProjectServer(st, rs, clk, rbac),
 		AppService:        api.NewAppServer(st, rs, clk, sealer),
@@ -615,12 +615,14 @@ func serverDNSNames(cfg config.Config) []string {
 }
 
 // serverIPs returns the IP SANs. 127.0.0.1 is always present (the gateway dials
-// the public port over loopback); the control node's mesh IP is added when the
-// mesh is enabled so joined nodes can verify the API cert over the tunnel.
-func serverIPs(cfg config.Config) []net.IP {
+// the public port over loopback); this node's own mesh IP is added when the mesh
+// is enabled so peers can verify the API cert over the tunnel. meshIP is the
+// node's actual mesh address (10.90.0.1 for the bootstrap node, its allocated
+// IP for a joined control node), NOT the hardcoded hub address.
+func serverIPs(meshIP string) []net.IP {
 	ips := []net.IP{net.ParseIP("127.0.0.1")}
-	if ip := controlMeshIP(cfg); ip != "" {
-		if parsed := net.ParseIP(ip); parsed != nil {
+	if meshIP != "" {
+		if parsed := net.ParseIP(meshIP); parsed != nil {
 			ips = append(ips, parsed)
 		}
 	}
@@ -628,8 +630,11 @@ func serverIPs(cfg config.Config) []net.IP {
 }
 
 // leaderAPIResolver maps the current raft leader to its API address for
-// leader-forwarding. Returns "" when this node is the leader. The multi-node
-// mesh mapping is exercised once nodes carry advertised endpoints (T-19/T-22).
+// leader-forwarding. Returns "" when this node is the leader. It prefers the
+// leader's mesh IP: that address is a SAN on the leader's API cert AND every
+// control node peers with it directly, so the forwarded dial both verifies and
+// routes. In a mesh cluster the raft transport address is already the mesh
+// IP:port, so it is the reliable fallback.
 func leaderAPIResolver(rs *raftstore.Store, st *state.Store, cfg config.Config) func() (string, error) {
 	_, apiPort, err := net.SplitHostPort(cfg.API.Listen)
 	if err != nil || apiPort == "" {
@@ -640,15 +645,11 @@ func leaderAPIResolver(rs *raftstore.Store, st *state.Store, cfg config.Config) 
 			return "", nil
 		}
 		transportAddr, id := rs.LeaderAddr()
-		if transportAddr == "" || id == "" {
+		if id == "" {
 			return "", fmt.Errorf("daemon: leader unknown")
 		}
-		if n, ok := st.Node(id); ok {
-			for _, ep := range n.GetPublicEndpoints() {
-				if host, _, e := net.SplitHostPort(ep); e == nil && host != "" {
-					return net.JoinHostPort(host, apiPort), nil
-				}
-			}
+		if n, ok := st.Node(id); ok && n.GetMeshIp() != "" {
+			return net.JoinHostPort(n.GetMeshIp(), apiPort), nil
 		}
 		host, _, e := net.SplitHostPort(transportAddr)
 		if e != nil || host == "" {

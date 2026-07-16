@@ -48,7 +48,7 @@ func startRegistry(ctx context.Context, cfg config.Config, st *state.Store, auth
 		return nil, fmt.Errorf("registry listen %s: %w", listen, err)
 	}
 	if !cfg.Registry.InsecureHTTP {
-		tlsCfg, terr := authority.ServerTLSConfig(serverDNSNames(cfg), serverIPs(cfg))
+		tlsCfg, terr := authority.ServerTLSConfig(serverDNSNames(cfg), serverIPs(controlMeshIP(cfg)))
 		if terr != nil {
 			_ = ln.Close()
 			_ = reg.Close()

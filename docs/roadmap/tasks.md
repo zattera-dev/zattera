@@ -9,9 +9,11 @@ something runnable.
 > **T-01 … T-54** (the full M1 milestone, exit gate green in CI), **T-87** and
 > **T-88** (multi-arch), plus **T-89** and **T-90** (production ingress +
 > public API TLS/ACME). Phase 6 (M2) is underway: **T-55** landed the raft HA
-> core and **T-55b** wired the daemon join-as-control bring-up (both 🟡 partial —
-> what remains needs real multi-host / cloud-harness verification: multi-hub
-> mesh for control nodes and leadership-reactive device loops). Next up: T-56.
+> core, **T-55b** wired the daemon join-as-control bring-up, and **T-56** added
+> gossip failure detection with a real-cluster HA test
+> (`test/cloud/ha_test.go`). Remaining T-55b polish (control mesh-hub for
+> workers, leadership-reactive device loops) is verifiable via that cloud test.
+> Next up: T-57 (meshsock) or T-59 (metrics).
 
 ## What already exists (do not rebuild)
 
@@ -1890,8 +1892,23 @@ leader's Join handler (`runControlPlane` does not re-register).
 mesh, kill the original leader, assert the cluster keeps serving and a new
 control node can still join; `zattera nodes rm` a control node.
 
-### T-56 — memberlist gossip failure detection
+### T-56 — memberlist gossip failure detection  ✅ **DONE**
 Phase 6 · Depends: T-55, T-19 · Size: M
+**Landed:** `internal/daemon/mesh/gossip.go` runs memberlist on control nodes
+(mesh IP:7946, WAN tuning, key = sha256 of the cluster CA hash); the shared
+decision types live in the dep-free leaf `internal/daemon/nodehealth`
+(`Decide` flap guard) so `api` can import them without a cycle (mesh's tests
+import api). `LivenessMonitor.WithGossip` feeds the snapshot into the same
+SetNodeStatus path — gossip accelerates DOWN and holds a node ALIVE past the
+heartbeat deadline; gossip-confirmed death bypasses the post-election grace
+window; with no gossip attached the behaviour is byte-identical to before.
+**Real-cluster verification (T-55 + T-56):** `test/cloud/ha_test.go`
+`TestControlHAAndGossip` — 3-control quorum, kill a follower and assert DOWN
+inside the gossip window (<30s), then kill the leader and assert the survivors
+re-elect and keep serving. Two addressing fixes landed with it so multi-control
+leader-forward works over the mesh: `serverIPs` now uses the node's ACTUAL mesh
+IP (cert SAN), and `leaderAPIResolver` forwards to the leader's mesh IP (a SAN,
+and every control node peers with it directly).
 **Files:** `internal/daemon/mesh/gossip.go`, `gossip_test.go`
 **Steps:**
 1. `hashicorp/memberlist` over the mesh (bind mesh IP :7946, LAN config with

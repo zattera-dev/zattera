@@ -67,6 +67,61 @@ func (c *Cluster) JoinWorker(arch string) *Node {
 	return n
 }
 
+// JoinControl brings up an additional CONTROL node that joins the cluster's raft
+// quorum (T-55) and waits until it registers. Requires StartControl first. It
+// advertises its own public endpoint so the other control nodes peer with it
+// directly (control-to-control full mesh), which is what lets the quorum survive
+// a leader loss.
+func (c *Cluster) JoinControl(arch string) *Node {
+	c.T.Helper()
+	if c.control == nil {
+		c.T.Fatal("cloud: JoinControl requires StartControl first")
+	}
+	token := c.controlJoinToken()
+	n := c.CreateNode(NodeSpec{Role: "control", Arch: arch})
+	n.InstallDocker()
+	n.InstallBinary()
+	n.WriteJoiningControlConfig(c.control.PublicIPv4(), token, c.clusterDomain)
+	n.StartService()
+	c.WaitNodeRegistered(n.Name())
+	c.T.Logf("cloud: control %s (%s) joined the quorum", n.Name(), arch)
+	return n
+}
+
+// controlJoinToken mints a single-use CONTROL+WORKER join token via the API.
+func (c *Cluster) controlJoinToken() string {
+	c.T.Helper()
+	ctx, cancel := context.WithTimeout(c.Ctx, 15*time.Second)
+	defer cancel()
+	resp, err := c.API().Nodes.CreateJoinToken(ctx, &zatterav1.CreateJoinTokenRequest{
+		SingleUse: true,
+		Roles:     []zatterav1.NodeRole{zatterav1.NodeRole_NODE_ROLE_CONTROL, zatterav1.NodeRole_NODE_ROLE_WORKER},
+	})
+	if err != nil {
+		c.T.Fatalf("cloud: create control join token: %v", err)
+	}
+	return resp.GetToken()
+}
+
+// APIFor returns an API client aimed at a specific control node (not memoized),
+// authenticated with the cluster bootstrap token. Use it to query the cluster
+// through a survivor after the original control node has been killed.
+func (c *Cluster) APIFor(n *Node) *apiclient.Client {
+	c.T.Helper()
+	if c.control == nil || c.control.bootstrapToken == "" {
+		c.T.Fatal("cloud: APIFor requires a started control node")
+	}
+	cli, err := apiclient.New(apiclient.Config{
+		Address:            net.JoinHostPort(n.PublicIPv4(), "8443"),
+		Token:              c.control.bootstrapToken,
+		InsecureSkipVerify: true,
+	})
+	if err != nil {
+		c.T.Fatalf("cloud: api client for %s: %v", n.Name(), err)
+	}
+	return cli
+}
+
 // API returns an authenticated API client for the control node (memoized),
 // using the bootstrap admin token. Verification is skipped (test cluster,
 // self-signed until ACME) — the token authenticates.

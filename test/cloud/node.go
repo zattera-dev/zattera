@@ -306,6 +306,37 @@ disabled = true
 }
 
 // WriteWorkerConfig writes a worker config that joins controlIP with token.
+// WriteJoiningControlConfig writes the config for a control node that JOINS an
+// existing cluster (T-55): it carries the control role AND a [join] block, and
+// advertises its own public endpoint so the other control nodes peer with it
+// directly.
+func (n *Node) WriteJoiningControlConfig(controlIP, token, domain string) {
+	cfg := fmt.Sprintf(`node_name = %q
+data_dir  = "/var/lib/zattera"
+roles     = ["control", "worker"]
+domain    = %q
+
+[join]
+addr  = "%s:8443"
+token = %q
+
+[api]
+listen         = ":8443"
+advertise_addr = "%s:8443"
+
+[registry]
+listen = ":5000"
+
+[mesh]
+listen_port      = 51820
+public_endpoints = ["%s:51820"]
+
+[acme]
+disabled = true
+`, n.spec.Name, domain, controlIP, token, n.machine.PublicIPv4, n.machine.PublicIPv4)
+	n.Push([]byte(cfg), "/etc/zattera/config.toml", "0644")
+}
+
 func (n *Node) WriteWorkerConfig(controlIP, token string) {
 	// Mesh endpoint: a NAT node has no public IPv4 — advertise nothing and let
 	// disco/hole-punching (or the private IP) handle it.
