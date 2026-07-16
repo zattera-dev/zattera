@@ -32,7 +32,7 @@ func TestClientJoin(t *testing.T) {
 		t.Fatalf("ca: %v", err)
 	}
 	rs := raftstore.NewTestStore(t)
-	joinSrv := api.NewJoinServer(rs.State(), rs, clock.NewFake(), authority, api.JoinConfig{
+	joinSrv := api.NewJoinServer(rs.State(), rs, clock.NewFake(), authority, nil, api.JoinConfig{
 		MeshEnabled:     true,
 		ControlGRPCAddr: "10.90.0.1:8443",
 		RegistryAddr:    "10.90.0.1:5000",

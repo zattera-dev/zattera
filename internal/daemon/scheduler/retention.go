@@ -12,6 +12,7 @@ import (
 
 	clusterv1 "github.com/zattera-dev/zattera/api/gen/zattera/cluster/v1"
 	zatterav1 "github.com/zattera-dev/zattera/api/gen/zattera/v1"
+	"github.com/zattera-dev/zattera/internal/daemon/leaderrunner"
 	"github.com/zattera-dev/zattera/internal/daemon/raftstore"
 	"github.com/zattera-dev/zattera/internal/pkgutil/clock"
 	"github.com/zattera-dev/zattera/internal/pkgutil/ids"
@@ -56,19 +57,13 @@ func NewRetention(store *raftstore.Store, clk clock.Clock, sweeper RegistrySweep
 
 // Run sweeps hourly while this node leads.
 func (r *Retention) Run(ctx context.Context) {
+	leaderrunner.Run(ctx, r.store, r.clk, r.leaderLoop)
+}
+
+// leaderLoop sweeps once immediately, then on every interval, until leadership
+// is lost or ctx ends.
+func (r *Retention) leaderLoop(ctx context.Context) {
 	for {
-		if ctx.Err() != nil {
-			return
-		}
-		if !r.store.IsLeader() {
-			select {
-			case <-ctx.Done():
-				return
-			case <-r.store.LeaderCh():
-			case <-r.clk.After(time.Second):
-			}
-			continue
-		}
 		if err := r.sweep(ctx); err != nil && !errors.Is(err, raftstore.ErrNotLeader) {
 			r.log.Warn("retention sweep failed", "err", err)
 		}
@@ -76,6 +71,9 @@ func (r *Retention) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-r.store.LeaderCh():
+			if !r.store.IsLeader() {
+				return
+			}
 		case <-r.clk.After(retentionInterval):
 		}
 	}

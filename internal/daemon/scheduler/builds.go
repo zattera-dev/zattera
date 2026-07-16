@@ -16,6 +16,7 @@ import (
 
 	clusterv1 "github.com/zattera-dev/zattera/api/gen/zattera/cluster/v1"
 	zatterav1 "github.com/zattera-dev/zattera/api/gen/zattera/v1"
+	"github.com/zattera-dev/zattera/internal/daemon/leaderrunner"
 	"github.com/zattera-dev/zattera/internal/daemon/raftstore"
 	"github.com/zattera-dev/zattera/internal/pkgutil/clock"
 	"github.com/zattera-dev/zattera/internal/pkgutil/ids"
@@ -132,21 +133,7 @@ func (d *BuildDispatcher) SetBuilderTimeout(t time.Duration) { d.lostTimeout = t
 
 // Run dispatches builds while this node leads, resuming on re-election.
 func (d *BuildDispatcher) Run(ctx context.Context) {
-	for {
-		if ctx.Err() != nil {
-			return
-		}
-		if !d.store.IsLeader() {
-			select {
-			case <-ctx.Done():
-				return
-			case <-d.store.LeaderCh():
-			case <-d.clk.After(time.Second):
-			}
-			continue
-		}
-		d.leaderLoop(ctx)
-	}
+	leaderrunner.Run(ctx, d.store, d.clk, d.leaderLoop)
 }
 
 func (d *BuildDispatcher) leaderLoop(ctx context.Context) {

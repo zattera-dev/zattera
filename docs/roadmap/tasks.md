@@ -8,7 +8,9 @@ something runnable.
 > **Status:** tasks marked ✅ **DONE** are complete. This currently covers
 > **T-01 … T-54** (the full M1 milestone, exit gate green in CI), **T-87** and
 > **T-88** (multi-arch), plus **T-89** and **T-90** (production ingress +
-> public API TLS/ACME). Everything else is still open; next up is Phase 6 (M2).
+> public API TLS/ACME). Phase 6 (M2) is underway: **T-55** landed the raft HA
+> core (🟡 partial — daemon join-as-control bring-up split out to **T-55b**).
+> Next up: T-55b or T-56.
 
 ## What already exists (do not rebuild)
 
@@ -1812,8 +1814,22 @@ workload impact (chaos suite); volumes snapshot/restore through MinIO;
 `zatterad restore` recreates a cluster from S3 on a fresh data dir; cron
 jobs fire.
 
-### T-55 — Multi-control-node HA
+### T-55 — Multi-control-node HA  🟡 **PARTIAL** (raft HA core done; daemon bring-up → T-55b)
 Phase 6 · Depends: T-17, T-08 · Size: L
+**Done:** the raft HA core — `raftTLSStreamLayer` mTLS transport
+(`internal/daemon/raftstore/transport.go`), idempotent `AddVoter`/`RemoveServer`
+(GetConfiguration check), `leaderrunner.Run` helper with all leader loops
+refactored onto it, `JoinResponse` control-handover fields (roles, data_key,
+data_key_version, ca_key_pem, raft_bind_addr) + leader-side `handoverControl`,
+`CA.PrivateKeyPEM`, completed control-node removal (raft leave before record
+delete). Acceptance test `TestHA` (grow via AddVoter / failover / remove) is
+green over real mTLS TCP transports.
+**Deferred to T-55b:** the node-side daemon bring-up (a `--control` join
+actually starting its own raft + control stack) is blocked on multi-control mesh
+addressing (see `meshwiring.go`: mesh is single-hub `10.90.0.1` today). Until
+T-55b, a control-role join persists its handover material and runs as a worker
+with a clear warning; the leader does NOT auto-AddVoter (would strand a voter
+with no live peer).
 **Files:** `internal/daemon/api/join.go` (extend), `internal/daemon/daemon.go`
 (extend), `test/chaos/ha_test.go`
 **Steps:**
@@ -1839,6 +1855,43 @@ NEVER AddVoter twice for the same id+addr (idempotent check via
 mesh disabled): kill leader → new leader elected, API writes keep working
 via leader-forward; remove a follower cleanly.
 **Acceptance:** `go test -tags chaos ./test/chaos/ -run TestHA -timeout 15m`
+
+### T-55b — Daemon join-as-control bring-up
+Phase 6 · Depends: T-55, multi-control mesh addressing · Size: L
+**Why split from T-55:** the raft HA core (transport, membership, handover
+protocol, leaderrunner, removal) landed in T-55 and is unit/chaos-tested
+in-process. The remaining work is the live daemon path for a `--control` join,
+which needs a routable per-control-node mesh IP for the raft transport to bind —
+and today the mesh is single-hub (`meshwiring.go` pins `10.90.0.1`). It also
+needs real multi-host verification (mesh + Docker), i.e. the cloud harness, not
+in-process tests.
+**Files:** `internal/daemon/daemon.go` (extract a shared `runControlPlane` from
+`Run`; add `runJoinedControl`), `internal/daemon/meshwiring.go` (control-node
+mesh IP allocation + control-as-hub), `internal/daemon/api/join.go` (node-
+triggered enrollment), `test/cloud/`.
+**Steps:**
+1. Multi-control mesh: allocate a distinct mesh IP per control node (join flow
+   already reserves low `10.90.0.x` for control) and bring the joined control
+   node's WireGuard up (spoke to existing hubs, then hub for its own peers)
+   before starting raft.
+2. `runJoinedControl`: persist the handover CA cert+key under `<data-dir>/ca/`,
+   build the `Keyring`/`Sealer` from `data_key`, start raft `Bootstrap=false`
+   with `raftstore.NewTLSTransport` bound to `raft_bind_addr`, then run the
+   shared control-plane stack (factor it out of `Run`).
+3. Enrollment without stranding a voter: the joined node signals the leader once
+   its raft transport is listening (a small RPC or a retry the node drives), and
+   the leader calls the idempotent `AddVoter`. Do NOT AddVoter from the Join
+   handler before the node is up (a 1→2 unreachable voter stalls commits).
+4. Leadership-reactive control loops that own devices (mesh hub, ingress) must
+   start/stop on `LeaderCh`, not only at boot — a joined follower that is later
+   elected must bring them up.
+**Gotchas:** the root CA private key now lives on every control node (chosen
+handover design) — treat it as a cluster secret; a joined follower serves its
+own API cert from the handover CA; `registerLocalNode` is already done by the
+leader's Join handler (don't double-register).
+**Tests:** cloud harness — join a 2nd/3rd control node over a real mesh, kill the
+original leader, assert the cluster keeps serving and a new control node can
+still join; `zattera nodes rm` a control node.
 
 ### T-56 — memberlist gossip failure detection
 Phase 6 · Depends: T-55, T-19 · Size: M

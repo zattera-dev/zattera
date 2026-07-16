@@ -117,6 +117,16 @@ func Run(ctx context.Context, cfg config.Config) error {
 		if err != nil {
 			return err
 		}
+		// A node that joined with the CONTROL role receives the cluster-secret
+		// handover (data key, CA key, raft address) so it can bring up its own
+		// raft + control stack. That bring-up depends on multi-control mesh
+		// addressing, which is not built yet (see meshwiring.go / T-55b): until
+		// it lands, a control-role join runs as a worker. The handover material
+		// is persisted so the follow-up path can consume it without re-joining.
+		if jr.isControl() && jr.handover != nil {
+			log.Warn("joined with the control role, but control-node bring-up is not wired yet (T-55b); running as a worker for now",
+				"node", jr.NodeID, "raft_bind_addr", jr.handover.raftBindAddr)
+		}
 		return runWorker(ctx, cfg, jr, log)
 	}
 	if !cfg.HasRole(config.RoleControl) {
@@ -163,6 +173,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 	// (the org entry) before the idempotency check — otherwise a restart would
 	// reprint the token.
 	var sealer secrets.Sealer
+	var keyring *secrets.Keyring
 	var bootToken, bootPassphrase string
 	if rs.IsLeader() {
 		if err := rs.Barrier(ctx); err != nil {
@@ -176,10 +187,11 @@ func Run(ctx context.Context, cfg config.Config) error {
 		if cfg.Dev {
 			bootOpts.Out = &bootOut
 		}
-		keyring, err := Bootstrap(ctx, rs, bootOpts)
+		kr, err := Bootstrap(ctx, rs, bootOpts)
 		if err != nil {
 			return err
 		}
+		keyring = kr
 		if keyring != nil {
 			if sealer, err = keyring.Sealer(); err != nil {
 				return err
@@ -240,10 +252,15 @@ func Run(ctx context.Context, cfg config.Config) error {
 	if apiPort == "" {
 		apiPort = "8443"
 	}
-	joinSrv := api.NewJoinServer(st, rs, clk, authority, api.JoinConfig{
+	_, raftPort, _ := net.SplitHostPort(cfg.Raft.Listen)
+	if raftPort == "" {
+		raftPort = "7480"
+	}
+	joinSrv := api.NewJoinServer(st, rs, clk, authority, keyring, api.JoinConfig{
 		MeshEnabled:     !cfg.Mesh.Disabled,
 		ControlGRPCAddr: net.JoinHostPort(agentHostIP(cfg), apiPort),
 		RegistryAddr:    registryClientAddr(cfg),
+		RaftPort:        raftPort,
 	}, log)
 
 	// Route builder (T-39): builds the global RouteSnapshot from replicated state

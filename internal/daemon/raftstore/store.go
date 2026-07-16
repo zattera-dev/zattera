@@ -226,13 +226,47 @@ func (s *Store) WaitForLeader(ctx context.Context) error {
 	}
 }
 
-// AddVoter joins another control node to the raft cluster (leader only).
+// AddVoter joins another control node to the raft cluster (leader only). It is
+// idempotent: if nodeID is already a voter at addr, it returns nil without
+// proposing a duplicate configuration change (a re-join must not AddVoter
+// twice). An existing id at a different address is upserted by raft.
 func (s *Store) AddVoter(nodeID, addr string) error {
+	if s.raft.State() != raft.Leader {
+		return ErrNotLeader
+	}
+	cfg := s.raft.GetConfiguration()
+	if err := cfg.Error(); err != nil {
+		return fmt.Errorf("raftstore: get configuration: %w", err)
+	}
+	for _, srv := range cfg.Configuration().Servers {
+		if srv.ID == raft.ServerID(nodeID) && srv.Address == raft.ServerAddress(addr) && srv.Suffrage == raft.Voter {
+			return nil
+		}
+	}
 	return s.raft.AddVoter(raft.ServerID(nodeID), raft.ServerAddress(addr), 0, applyTimeout).Error()
 }
 
-// RemoveServer removes a control node from the raft cluster (leader only).
+// RemoveServer removes a control node from the raft cluster (leader only). It is
+// idempotent: removing a server already absent from the configuration returns
+// nil without proposing a change.
 func (s *Store) RemoveServer(nodeID string) error {
+	if s.raft.State() != raft.Leader {
+		return ErrNotLeader
+	}
+	cfg := s.raft.GetConfiguration()
+	if err := cfg.Error(); err != nil {
+		return fmt.Errorf("raftstore: get configuration: %w", err)
+	}
+	present := false
+	for _, srv := range cfg.Configuration().Servers {
+		if srv.ID == raft.ServerID(nodeID) {
+			present = true
+			break
+		}
+	}
+	if !present {
+		return nil
+	}
 	return s.raft.RemoveServer(raft.ServerID(nodeID), 0, applyTimeout).Error()
 }
 

@@ -19,6 +19,7 @@ import (
 	zatterav1 "github.com/zattera-dev/zattera/api/gen/zattera/v1"
 	"github.com/zattera-dev/zattera/internal/daemon/ca"
 	"github.com/zattera-dev/zattera/internal/daemon/raftstore"
+	"github.com/zattera-dev/zattera/internal/daemon/secrets"
 	"github.com/zattera-dev/zattera/internal/pkgutil/clock"
 	"github.com/zattera-dev/zattera/internal/pkgutil/ids"
 )
@@ -56,6 +57,57 @@ func TestJoin(t *testing.T) {
 		}
 		if n.GetLabels()["zattera.dev/os-arch"] != "linux/amd64" {
 			t.Fatalf("os-arch label missing: %+v", n.GetLabels())
+		}
+	})
+
+	t.Run("control join: handover carries data key, CA key, raft addr", func(t *testing.T) {
+		h := newJoinHarness(t, true)
+		secret := h.mintToken(t, true, 0, zatterav1.NodeRole_NODE_ROLE_CONTROL)
+		csr, _ := genCSR(t)
+
+		resp, err := h.srv.Join(context.Background(), &clusterv1.JoinRequest{
+			TokenSecret: secret, NodeName: "control-2", CsrPem: csr, OsArch: "linux/amd64",
+		})
+		if err != nil {
+			t.Fatalf("control join: %v", err)
+		}
+		// The token's CONTROL role is echoed back so the node runs the control stack.
+		if len(resp.GetRoles()) != 1 || resp.GetRoles()[0] != zatterav1.NodeRole_NODE_ROLE_CONTROL {
+			t.Fatalf("roles = %v, want [CONTROL]", resp.GetRoles())
+		}
+		// First control node beyond the seed takes 10.90.0.2; raft binds it.
+		if want := resp.GetMeshIp() + ":7480"; resp.GetRaftBindAddr() != want {
+			t.Fatalf("raft_bind_addr = %q, want %q", resp.GetRaftBindAddr(), want)
+		}
+		// Cluster secrets travel over the (mTLS) join hop.
+		if len(resp.GetDataKey()) != 32 {
+			t.Fatalf("data key length = %d, want 32", len(resp.GetDataKey()))
+		}
+		if resp.GetDataKeyVersion() == 0 {
+			t.Fatal("data key version not set")
+		}
+		blk, _ := pem.Decode(resp.GetCaKeyPem())
+		if blk == nil || blk.Type != "EC PRIVATE KEY" {
+			t.Fatalf("ca_key_pem is not an EC private key: %v", blk)
+		}
+		if _, err := x509.ParseECPrivateKey(blk.Bytes); err != nil {
+			t.Fatalf("ca_key_pem does not parse: %v", err)
+		}
+	})
+
+	t.Run("control join without mesh: no handover, worker-only fallback", func(t *testing.T) {
+		h := newJoinHarness(t, false) // mesh disabled
+		secret := h.mintToken(t, true, 0, zatterav1.NodeRole_NODE_ROLE_CONTROL)
+		csr, _ := genCSR(t)
+
+		resp, err := h.srv.Join(context.Background(), &clusterv1.JoinRequest{
+			TokenSecret: secret, NodeName: "control-x", CsrPem: csr, OsArch: "linux/amd64",
+		})
+		if err != nil {
+			t.Fatalf("control join (no mesh): %v", err)
+		}
+		if resp.GetRaftBindAddr() != "" || len(resp.GetDataKey()) != 0 || len(resp.GetCaKeyPem()) != 0 {
+			t.Fatalf("mesh-disabled control join must not hand over raft/secret material: %+v", resp)
 		}
 	})
 
@@ -188,8 +240,19 @@ func newJoinHarness(t *testing.T, mesh bool) *joinHarness {
 	rs := raftstore.NewTestStore(t)
 	clk := clock.NewFake()
 	cfg := JoinConfig{MeshEnabled: mesh, ControlGRPCAddr: "10.90.0.1:8443", RegistryAddr: "10.90.0.1:5000"}
+	if mesh {
+		cfg.RaftPort = "7480"
+	}
+	dataKey, err := secrets.GenerateDataKey()
+	if err != nil {
+		t.Fatalf("data key: %v", err)
+	}
+	keyring, err := secrets.NewKeyring(dataKey, 1)
+	if err != nil {
+		t.Fatalf("keyring: %v", err)
+	}
 	return &joinHarness{
-		srv: NewJoinServer(rs.State(), rs, clk, authority, cfg, nil),
+		srv: NewJoinServer(rs.State(), rs, clk, authority, keyring, cfg, nil),
 		rs:  rs,
 		ca:  authority,
 		clk: clk,

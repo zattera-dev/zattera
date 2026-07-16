@@ -15,6 +15,7 @@ import (
 
 	clusterv1 "github.com/zattera-dev/zattera/api/gen/zattera/cluster/v1"
 	zatterav1 "github.com/zattera-dev/zattera/api/gen/zattera/v1"
+	"github.com/zattera-dev/zattera/internal/daemon/leaderrunner"
 	"github.com/zattera-dev/zattera/internal/daemon/raftstore"
 	"github.com/zattera-dev/zattera/internal/pkgutil/clock"
 	"github.com/zattera-dev/zattera/internal/pkgutil/ids"
@@ -46,21 +47,7 @@ func New(store *raftstore.Store, clk clock.Clock, log *slog.Logger) *Scheduler {
 // Run evaluates while this node is the leader, stopping cleanly on leadership
 // loss and resuming when re-elected. Blocks until ctx is canceled.
 func (s *Scheduler) Run(ctx context.Context) {
-	for {
-		if ctx.Err() != nil {
-			return
-		}
-		if !s.store.IsLeader() {
-			select {
-			case <-ctx.Done():
-				return
-			case <-s.store.LeaderCh(): // leadership changed; re-check
-			case <-s.clock.After(time.Second):
-			}
-			continue
-		}
-		s.leaderLoop(ctx)
-	}
+	leaderrunner.Run(ctx, s.store, s.clock, s.leaderLoop)
 }
 
 // leaderLoop runs the watch+tick evaluation until leadership is lost or ctx ends.

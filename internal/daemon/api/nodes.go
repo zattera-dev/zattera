@@ -143,6 +143,19 @@ func (s *NodeServer) RemoveNode(ctx context.Context, req *zatterav1.RemoveNodeRe
 		return nil, status.Error(codes.FailedPrecondition, "refusing to remove the last control node without force")
 	}
 
+	// A control node leaves the raft quorum FIRST: if this fails we return an
+	// error with the node record intact (retryable) rather than orphaning a raft
+	// voter that no longer maps to a node. RemoveServer is idempotent, so a retry
+	// after a partial removal is safe. Only *raftstore.Store implements it; a
+	// nil/forwarding Applier skips (control HA disabled).
+	if isControl {
+		if m, ok := s.raft.(interface{ RemoveServer(string) error }); ok {
+			if err := m.RemoveServer(req.GetNodeId()); err != nil {
+				return nil, status.Errorf(codes.Unavailable, "remove control node from raft quorum: %v", err)
+			}
+		}
+	}
+
 	// Reap the node's assignments so the scheduler re-places their replicas.
 	var reap []string
 	for _, a := range s.store.ListAssignmentsByNode(req.GetNodeId()) {
@@ -155,13 +168,6 @@ func (s *NodeServer) RemoveNode(ctx context.Context, req *zatterav1.RemoveNodeRe
 	}
 	if err := s.apply(ctx, &clusterv1.Command{Mutation: &clusterv1.Command_DeleteNode{DeleteNode: &clusterv1.DeleteByID{Id: req.GetNodeId()}}}); err != nil {
 		return nil, toStatus(err)
-	}
-	if isControl {
-		// Best-effort raft membership removal (only *raftstore.Store implements
-		// it; a nil/forwarding Applier simply skips).
-		if m, ok := s.raft.(interface{ RemoveServer(string) error }); ok {
-			_ = m.RemoveServer(req.GetNodeId())
-		}
 	}
 	return &emptypb.Empty{}, nil
 }

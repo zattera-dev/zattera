@@ -48,10 +48,32 @@ type joinResult struct {
 	MeshEnabled     bool   `json:"mesh_enabled"`
 
 	// On-disk material (not serialized into mesh.json).
-	caPEM        []byte             `json:"-"`
-	certPEM      []byte             `json:"-"`
-	keyPEM       []byte             `json:"-"`
-	initialPeers *clusterv1.PeerSet `json:"-"`
+	caPEM        []byte               `json:"-"`
+	certPEM      []byte               `json:"-"`
+	keyPEM       []byte               `json:"-"`
+	initialPeers *clusterv1.PeerSet   `json:"-"`
+	roles        []zatterav1.NodeRole `json:"-"`
+	handover     *controlHandover     `json:"-"`
+}
+
+// controlHandover carries the cluster secrets a joining CONTROL node receives so
+// it can bring up its own raft + control stack (T-55). Nil for worker joins.
+type controlHandover struct {
+	dataKey        []byte
+	dataKeyVersion uint32
+	caKeyPEM       []byte
+	raftBindAddr   string
+}
+
+// isControl reports whether the control plane assigned this node the control
+// role (authoritative over local config).
+func (r *joinResult) isControl() bool {
+	for _, role := range r.roles {
+		if role == zatterav1.NodeRole_NODE_ROLE_CONTROL {
+			return true
+		}
+	}
+	return false
 }
 
 // runJoin enrolls this node with a control plane: it pins the cluster CA from
@@ -122,6 +144,15 @@ func runJoin(ctx context.Context, cfg config.Config, log *slog.Logger) (*joinRes
 		certPEM:         resp.GetNodeCertPem(),
 		keyPEM:          keyPEM,
 		initialPeers:    resp.GetInitialPeers(),
+		roles:           resp.GetRoles(),
+	}
+	if len(resp.GetCaKeyPem()) > 0 || resp.GetRaftBindAddr() != "" {
+		res.handover = &controlHandover{
+			dataKey:        resp.GetDataKey(),
+			dataKeyVersion: resp.GetDataKeyVersion(),
+			caKeyPEM:       resp.GetCaKeyPem(),
+			raftBindAddr:   resp.GetRaftBindAddr(),
+		}
 	}
 	if err := persistJoin(cfg.DataDir, res); err != nil {
 		return nil, err

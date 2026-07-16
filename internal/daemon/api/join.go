@@ -13,6 +13,7 @@ import (
 	clusterv1 "github.com/zattera-dev/zattera/api/gen/zattera/cluster/v1"
 	zatterav1 "github.com/zattera-dev/zattera/api/gen/zattera/v1"
 	"github.com/zattera-dev/zattera/internal/daemon/ca"
+	"github.com/zattera-dev/zattera/internal/daemon/secrets"
 	"github.com/zattera-dev/zattera/internal/pkgutil/clock"
 	"github.com/zattera-dev/zattera/internal/pkgutil/ids"
 	"github.com/zattera-dev/zattera/internal/state"
@@ -30,6 +31,10 @@ type JoinConfig struct {
 	ControlGRPCAddr string
 	// RegistryAddr is the embedded registry endpoint for image pulls.
 	RegistryAddr string
+	// RaftPort is the port control nodes bind for the raft transport (e.g.
+	// "7480"). A joining control node's raft address is meshIP:RaftPort. Empty
+	// disables control-node raft handover.
+	RaftPort string
 }
 
 // JoinServer implements JoinService: token-authenticated node enrollment. It is
@@ -37,20 +42,23 @@ type JoinConfig struct {
 // in the handler.
 type JoinServer struct {
 	clusterv1.UnimplementedJoinServiceServer
-	store *state.Store
-	raft  Applier
-	clock clock.Clock
-	ca    *ca.CA
-	cfg   JoinConfig
-	log   *slog.Logger
+	store   *state.Store
+	raft    Applier
+	clock   clock.Clock
+	ca      *ca.CA
+	keyring *secrets.Keyring
+	cfg     JoinConfig
+	log     *slog.Logger
 }
 
-// NewJoinServer builds the join service.
-func NewJoinServer(store *state.Store, raft Applier, clk clock.Clock, authority *ca.CA, cfg JoinConfig, log *slog.Logger) *JoinServer {
+// NewJoinServer builds the join service. keyring is the cluster data key (may be
+// nil on a node that never bootstrapped/unsealed); it is handed to joining
+// control nodes so they come up already unsealed (T-55).
+func NewJoinServer(store *state.Store, raft Applier, clk clock.Clock, authority *ca.CA, keyring *secrets.Keyring, cfg JoinConfig, log *slog.Logger) *JoinServer {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &JoinServer{store: store, raft: raft, clock: clk, ca: authority, cfg: cfg, log: log}
+	return &JoinServer{store: store, raft: raft, clock: clk, ca: authority, keyring: keyring, cfg: cfg, log: log}
 }
 
 // Join enrolls a node: it verifies + consumes the token, allocates a mesh IP,
@@ -117,8 +125,7 @@ func (s *JoinServer) Join(ctx context.Context, req *clusterv1.JoinRequest) (*clu
 		return nil, toStatus(err)
 	}
 
-	s.log.Info("node joined", "node", nodeID, "mesh_ip", meshIP, "roles", roles)
-	return &clusterv1.JoinResponse{
+	resp := &clusterv1.JoinResponse{
 		NodeId:           nodeID,
 		MeshIp:           meshIP,
 		CaCertPem:        s.ca.CABundlePEM(),
@@ -129,7 +136,53 @@ func (s *JoinServer) Join(ctx context.Context, req *clusterv1.JoinRequest) (*clu
 		RegistryUsername: regUser,
 		RegistryPassword: regPass,
 		MeshEnabled:      s.cfg.MeshEnabled,
-	}, nil
+		Roles:            roles,
+	}
+
+	// Control-node handover (T-55): enroll the node in raft and hand it the
+	// cluster secrets so it comes up as a fully autonomous control node. Requires
+	// the mesh (raft binds the node's mesh IP) — a control token joined
+	// mesh-disabled falls back to worker-only.
+	if hasControlRole(roles) {
+		if err := s.handoverControl(nodeID, meshIP, resp); err != nil {
+			return nil, err
+		}
+	}
+
+	s.log.Info("node joined", "node", nodeID, "mesh_ip", meshIP, "roles", roles)
+	return resp, nil
+}
+
+// handoverControl fills the response's cluster-secret handover fields for a
+// joining control node: the data key, the root CA private key, and the raft
+// address it must bind — so it can come up fully autonomous and unsealed
+// (spec §2.10). It requires the mesh (raft binds the node's mesh IP); a control
+// token joined mesh-disabled falls back to worker-only.
+//
+// Raft enrollment (AddVoter) is intentionally NOT performed here: the leader
+// must not add a voter before that node's raft transport is listening, or an
+// unreachable voter stalls commits. Enrollment is triggered by the node once it
+// is up (see raftEnroll / T-55b) — a hook that lands with the daemon
+// join-as-control bring-up, which depends on multi-control mesh addressing.
+func (s *JoinServer) handoverControl(nodeID, meshIP string, resp *clusterv1.JoinResponse) error {
+	if !s.cfg.MeshEnabled || meshIP == "" || s.cfg.RaftPort == "" {
+		s.log.Warn("control-role join without a mesh; node will run worker-only (control HA needs the mesh)", "node", nodeID)
+		return nil
+	}
+	caKeyPEM, err := s.ca.PrivateKeyPEM()
+	if err != nil {
+		return status.Errorf(codes.Internal, "export ca key: %v", err)
+	}
+	if s.keyring == nil {
+		// Without the data key the new control node cannot decrypt secrets; this
+		// means the handling node itself is not unsealed — a config/ordering bug.
+		return status.Error(codes.FailedPrecondition, "cluster is not unsealed; cannot hand a data key to a joining control node")
+	}
+	resp.DataKey = s.keyring.DataKey()
+	resp.DataKeyVersion = s.keyring.KeyVersion()
+	resp.CaKeyPem = caKeyPEM
+	resp.RaftBindAddr = net.JoinHostPort(meshIP, s.cfg.RaftPort)
+	return nil
 }
 
 // verifyToken matches the presented secret against an unexpired, unused join

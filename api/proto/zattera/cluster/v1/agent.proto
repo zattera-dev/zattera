@@ -63,6 +63,22 @@ message JoinResponse {
   string registry_username = 8;
   string registry_password = 9;   // node registry credential (basic auth)
   bool mesh_enabled = 10;
+  // The roles the control plane assigned this node (from the join token). A
+  // node with the CONTROL role brings up its own raft + control stack; others
+  // run as workers. Authoritative over local config.
+  repeated zattera.v1.NodeRole roles = 11;
+
+  // --- Control-node handover (populated only for CONTROL joins, T-55) --------
+  // These carry cluster secrets over the already-mTLS join hop so a joining
+  // control node comes up fully autonomous (auto-unseal within a live cluster,
+  // spec §2.10) without the recovery passphrase.
+  bytes data_key = 12;            // plaintext cluster data key (secret sealing)
+  uint32 data_key_version = 13;   // its key version
+  bytes ca_key_pem = 14;          // root CA private key (PEM) — every control node signs
+  // raft_bind_addr is the address the joining control node must bind for the
+  // raft transport (its mesh IP + raft port). The leader AddVoters this exact
+  // address, so both sides agree without re-deriving it.
+  string raft_bind_addr = 15;
 }
 
 // ---------------------------------------------------------------------------

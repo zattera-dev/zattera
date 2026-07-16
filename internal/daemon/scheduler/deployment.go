@@ -10,6 +10,7 @@ import (
 
 	clusterv1 "github.com/zattera-dev/zattera/api/gen/zattera/cluster/v1"
 	zatterav1 "github.com/zattera-dev/zattera/api/gen/zattera/v1"
+	"github.com/zattera-dev/zattera/internal/daemon/leaderrunner"
 	"github.com/zattera-dev/zattera/internal/daemon/raftstore"
 	"github.com/zattera-dev/zattera/internal/pkgutil/clock"
 	"github.com/zattera-dev/zattera/internal/pkgutil/ids"
@@ -60,21 +61,7 @@ func NewOrchestrator(store *raftstore.Store, clk clock.Clock, log *slog.Logger) 
 
 // Run reconciles deployments while this node leads, resuming on re-election.
 func (o *Orchestrator) Run(ctx context.Context) {
-	for {
-		if ctx.Err() != nil {
-			return
-		}
-		if !o.store.IsLeader() {
-			select {
-			case <-ctx.Done():
-				return
-			case <-o.store.LeaderCh():
-			case <-o.clock.After(time.Second):
-			}
-			continue
-		}
-		o.leaderLoop(ctx)
-	}
+	leaderrunner.Run(ctx, o.store, o.clock, o.leaderLoop)
 }
 
 func (o *Orchestrator) leaderLoop(ctx context.Context) {

@@ -283,6 +283,18 @@ func (c *CA) CABundlePEM() []byte {
 	return append([]byte(nil), c.certPEM...)
 }
 
+// PrivateKeyPEM returns the root CA private key in PEM (EC PRIVATE KEY). It is
+// handed to a joining control node over the mTLS join hop (T-55) so every
+// control node can independently sign node certs, serve its API cert, and run
+// ACME. Guard it like any cluster secret — a leak is a full trust compromise.
+func (c *CA) PrivateKeyPEM() ([]byte, error) {
+	der, err := x509.MarshalECPrivateKey(c.key)
+	if err != nil {
+		return nil, fmt.Errorf("ca: marshal root key: %w", err)
+	}
+	return pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der}), nil
+}
+
 // Certificate returns the parsed root certificate (used for the CA-pin hash in
 // join tokens, T-12).
 func (c *CA) Certificate() *x509.Certificate { return c.cert }
