@@ -48,11 +48,12 @@ func meshListenPort(cfg config.Config) uint16 {
 
 func wgKeyPath(dataDir string) string { return filepath.Join(dataDir, "wg.key") }
 
-// startControlMesh brings the control node's WireGuard device up, records its
-// mesh IP + public key in state, enables IP forwarding, and keeps its own peer
-// set in sync (dialing its own MeshService over loopback). Returns the manager
-// so the caller can tear it down.
-func startControlMesh(ctx context.Context, cfg config.Config, rs *raftstore.Store, authority *ca.CA, nodeID string, log *slog.Logger) (*mesh.DeviceManager, error) {
+// bringUpControlMeshDevice brings the control hub's WireGuard device up on its
+// mesh IP and enables IP forwarding. It writes NO cluster state, so it is safe
+// to call before raft is up — the raft mTLS transport and the gossip detector
+// both bind this node's mesh IP, so the device must exist first. Returns the
+// manager so the caller can tear it down and later register/peer-sync it.
+func bringUpControlMeshDevice(ctx context.Context, cfg config.Config, log *slog.Logger) (*mesh.DeviceManager, error) {
 	ip := controlMeshIP(cfg)
 	addr, err := netip.ParseAddr(ip)
 	if err != nil {
@@ -67,16 +68,24 @@ func startControlMesh(ctx context.Context, cfg config.Config, rs *raftstore.Stor
 	}); err != nil {
 		return nil, err
 	}
+	enableIPForward(log)
+	log.Info("control mesh device up", "mesh_ip", ip)
+	return dm, nil
+}
+
+// registerControlMesh records the hub's mesh identity (IP + WG public key) in
+// cluster state and starts peer sync (dialing its own MeshService over
+// loopback). It requires raft leadership and the local API, and dm must already
+// be up (see bringUpControlMeshDevice).
+func registerControlMesh(ctx context.Context, cfg config.Config, rs *raftstore.Store, dm *mesh.DeviceManager, authority *ca.CA, nodeID string, log *slog.Logger) {
 	pub, err := dm.PublicKey()
 	if err != nil {
-		_ = dm.Down(ctx)
-		return nil, err
+		log.Warn("mesh: control node public key", "err", err)
+		return
 	}
-	if err := updateNodeMesh(ctx, rs, nodeID, ip, pub, cfg.Mesh.PublicEndpoints); err != nil {
+	if err := updateNodeMesh(ctx, rs, nodeID, controlMeshIP(cfg), pub, cfg.Mesh.PublicEndpoints); err != nil {
 		log.Warn("mesh: could not record control node mesh identity", "err", err)
 	}
-	enableIPForward(log)
-
 	go func() {
 		err := mesh.RunPeerSync(ctx, mesh.PeerSyncConfig{
 			NodeID:  nodeID,
@@ -88,8 +97,7 @@ func startControlMesh(ctx context.Context, cfg config.Config, rs *raftstore.Stor
 			log.Warn("control peersync stopped", "err", err)
 		}
 	}()
-	log.Info("control mesh up", "mesh_ip", ip)
-	return dm, nil
+	log.Info("control mesh registered", "mesh_ip", controlMeshIP(cfg))
 }
 
 // updateNodeMesh records the node's mesh IP + WG public key so peers can reach

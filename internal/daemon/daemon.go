@@ -24,6 +24,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/hashicorp/raft"
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -138,13 +139,44 @@ func Run(ctx context.Context, cfg config.Config) error {
 	}
 
 	st := state.New()
-	rs, err := raftstore.New(raftstore.Config{
+
+	// Cluster CA (T-01): issues the API server cert and node identities. Loaded
+	// before raft because the raft mTLS transport needs a node cert.
+	authority, err := ca.LoadOrCreate(cfg.DataDir)
+	if err != nil {
+		return err
+	}
+
+	// On a mesh cluster, raft and gossip bind this node's MESH IP — so bring the
+	// WireGuard device up first, then run raft over mTLS on the mesh (never the
+	// public interface). This is what lets joined control nodes replicate with
+	// the bootstrap node. Dev/single-node keeps loopback plain TCP.
+	meshIP := controlMeshIP(cfg)
+	var controlMesh *mesh.DeviceManager
+	rsCfg := raftstore.Config{
 		NodeID:    nodeID,
 		DataDir:   filepath.Join(cfg.DataDir, "raft"),
-		BindAddr:  bindLoopback(cfg.Raft.Listen),
 		Bootstrap: true,
 		Logger:    log,
-	}, st)
+	}
+	if meshIP != "" {
+		dm, derr := bringUpControlMeshDevice(ctx, cfg, log)
+		if derr != nil {
+			return fmt.Errorf("daemon: control mesh device: %w", derr)
+		}
+		controlMesh = dm
+		defer func() { _ = controlMesh.Down(context.Background()) }()
+
+		raftAddr := net.JoinHostPort(meshIP, raftPortOf(cfg))
+		trans, terr := controlRaftTransport(authority, nodeID, meshIP, raftAddr, log)
+		if terr != nil {
+			return terr
+		}
+		rsCfg.Transport = trans
+	} else {
+		rsCfg.BindAddr = bindLoopback(cfg.Raft.Listen)
+	}
+	rs, err := raftstore.New(rsCfg, st)
 	if err != nil {
 		return err
 	}
@@ -157,13 +189,8 @@ func Run(ctx context.Context, cfg config.Config) error {
 		"node_id", nodeID,
 		"data_dir", cfg.DataDir,
 		"dev", cfg.Dev,
+		"mesh_ip", meshIP,
 	)
-
-	// Cluster CA (T-01): issues the API server cert and node identities.
-	authority, err := ca.LoadOrCreate(cfg.DataDir)
-	if err != nil {
-		return err
-	}
 
 	// First-boot bootstrap (T-03): the leader creates org/admin/token/cluster
 	// key and prints the bootstrap token once. Followers skip silently.
@@ -221,7 +248,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 		}
 	}
 
-	return runControlPlane(ctx, cfg, rs, nodeID, controlMeshIP(cfg), authority, sealer, keyring, true, log)
+	return runControlPlane(ctx, cfg, rs, nodeID, meshIP, authority, sealer, keyring, controlMesh, log)
 }
 
 // runControlPlane wires and runs the full control-plane stack — API server,
@@ -230,9 +257,11 @@ func Run(ctx context.Context, cfg config.Config) error {
 // errors. It is shared by the bootstrap control node (Run) and a node that
 // joined with the control role (runJoinedControl). meshIP is this node's own
 // mesh address (gossip binds it; "" when the mesh is disabled).
-// bringUpControlMesh brings up the mesh hub device; a joined control node passes
-// false because it already brought its mesh up as a spoke (see runJoinedControl).
-func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store, nodeID, meshIP string, authority *ca.CA, sealer secrets.Sealer, keyring *secrets.Keyring, bringUpControlMesh bool, log *slog.Logger) error {
+// controlMesh, when non-nil, is this node's already-up WireGuard hub device
+// (brought up before raft so it could bind the mesh IP); runControlPlane records
+// its identity in state and starts peer sync. A joined control node passes nil
+// because it already brought its mesh up as a spoke (see runJoinedControl).
+func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store, nodeID, meshIP string, authority *ca.CA, sealer secrets.Sealer, keyring *secrets.Keyring, controlMesh *mesh.DeviceManager, log *slog.Logger) error {
 	st := rs.State()
 
 	// Public API services (T-04 auth, T-05 projects+rbac, T-06 apps) with the
@@ -426,17 +455,12 @@ func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store
 			LocalLoad:     cfg.Dev,
 		}, log).Run(ctx)
 
-	// Mesh (T-19): on a mesh-enabled control node, bring WireGuard up as the hub
-	// and keep its own peer set in sync. Single-node/dev disables the mesh. A
-	// joined control node passes bringUpControlMesh=false — it is already a mesh
-	// spoke at its own IP (multi-hub mesh for control nodes is a later task).
-	if bringUpControlMesh && !cfg.Mesh.Disabled && rs.IsLeader() {
-		meshMgr, err := startControlMesh(ctx, cfg, rs, authority, nodeID, log)
-		if err != nil {
-			log.Warn("mesh bring-up failed; continuing without mesh", "err", err)
-		} else {
-			defer func() { _ = meshMgr.Down(context.Background()) }()
-		}
+	// Mesh (T-19): the hub device is already up (brought up before raft so it
+	// could bind the mesh IP). Record its identity in state and start peer sync
+	// now that raft + the API are up. The device is owned/torn down by the caller.
+	// A joined control node passes controlMesh=nil — it set up its own spoke mesh.
+	if controlMesh != nil && rs.IsLeader() {
+		registerControlMesh(ctx, cfg, rs, controlMesh, authority, nodeID, log)
 	}
 
 	// Node agent (T-14): on worker-capable nodes, open the AgentSync stream to
@@ -772,7 +796,30 @@ func runJoinedControl(ctx context.Context, cfg config.Config, jr *joinResult, lo
 	}
 	log.Info("joined control plane", "node", jr.NodeID)
 
-	return runControlPlane(ctx, cfg, rs, jr.NodeID, jr.MeshIP, authority, sealer, keyring, false, log)
+	return runControlPlane(ctx, cfg, rs, jr.NodeID, jr.MeshIP, authority, sealer, keyring, nil, log)
+}
+
+// raftPortOf returns the raft transport port from config (default 7480).
+func raftPortOf(cfg config.Config) string {
+	_, port, _ := net.SplitHostPort(cfg.Raft.Listen)
+	if port == "" {
+		port = "7480"
+	}
+	return port
+}
+
+// controlRaftTransport builds the mTLS raft transport for a control node bound to
+// its mesh address, presenting a freshly issued node identity cert.
+func controlRaftTransport(authority *ca.CA, nodeID, meshIP, bindAddr string, _ *slog.Logger) (raft.Transport, error) {
+	leaf, err := authority.IssueNode(nodeID, net.ParseIP(meshIP), ca.NodeCertTTL)
+	if err != nil {
+		return nil, fmt.Errorf("daemon: raft node cert: %w", err)
+	}
+	cert, err := leaf.TLSCertificate(authority.CABundlePEM())
+	if err != nil {
+		return nil, fmt.Errorf("daemon: raft node tls cert: %w", err)
+	}
+	return raftstore.NewTLSTransport(bindAddr, bindAddr, cert, authority.Pool(), os.Stderr)
 }
 
 // persistHandoverCA writes the handed-over cluster CA cert + private key to the
