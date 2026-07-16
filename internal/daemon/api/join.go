@@ -138,7 +138,7 @@ func (s *JoinServer) Join(ctx context.Context, req *clusterv1.JoinRequest) (*clu
 		MeshIp:           meshIP,
 		CaCertPem:        s.ca.CABundlePEM(),
 		NodeCertPem:      certPEM,
-		InitialPeers:     s.buildInitialPeers(),
+		InitialPeers:     s.buildInitialPeers(nodeID, roles),
 		ControlGrpcAddr:  s.cfg.ControlGRPCAddr,
 		RegistryAddr:     s.cfg.RegistryAddr,
 		RegistryUsername: regUser,
@@ -312,28 +312,47 @@ func nodeRecord(nodeID string, roles []zatterav1.NodeRole, req *clusterv1.JoinRe
 	}
 }
 
-// buildInitialPeers returns the control-node peers a joining worker should dial
-// (hub-and-spoke). Empty when the mesh is disabled; T-19 refines distribution.
-func (s *JoinServer) buildInitialPeers() *clusterv1.PeerSet {
+// buildInitialPeers returns the WireGuard peers a joining node should install to
+// reach the control plane before peer sync takes over. It is role-aware:
+//
+//   - a WORKER gets the control nodes as hub-and-spoke peers, each routing the
+//     whole mesh (allowed_ips = 10.90.0.0/16);
+//   - a CONTROL node gets a DIRECT /32 peer to every other mesh-ready node. Two
+//     hub peers both claiming 10.90.0.0/16 is invalid — WireGuard can only route
+//     a prefix to one peer — so a control node must peer with each control node
+//     directly (this is what let the 3rd control node's mesh come up).
+//
+// Empty when the mesh is disabled. Excludes the joining node itself.
+func (s *JoinServer) buildInitialPeers(selfID string, roles []zatterav1.NodeRole) *clusterv1.PeerSet {
 	if !s.cfg.MeshEnabled {
 		return nil
 	}
+	selfControl := hasControlRole(roles)
 	var peers []*clusterv1.Peer
 	for _, n := range s.store.ListNodes() {
-		if !hasControlRole(n.GetRoles()) || n.GetWireguardPublicKey() == "" {
+		if n.GetMeta().GetId() == selfID || n.GetWireguardPublicKey() == "" || n.GetMeshIp() == "" {
 			continue
 		}
-		peers = append(peers, &clusterv1.Peer{
+		isControl := hasControlRole(n.GetRoles())
+		if !selfControl && !isControl {
+			continue // a worker only needs the control hubs initially
+		}
+		peer := &clusterv1.Peer{
 			NodeId:                     n.GetMeta().GetId(),
 			WireguardPublicKey:         n.GetWireguardPublicKey(),
 			MeshIp:                     n.GetMeshIp(),
 			Endpoints:                  n.GetPublicEndpoints(),
 			PersistentKeepaliveSeconds: 25,
-			IsControl:                  true,
-			AllowedIps:                 []string{meshCIDR},
-		})
+			IsControl:                  isControl,
+		}
+		if selfControl {
+			peer.AllowedIps = []string{n.GetMeshIp() + "/32"} // direct path per node
+		} else {
+			peer.AllowedIps = []string{meshCIDR} // hub route for the whole mesh
+		}
+		peers = append(peers, peer)
 	}
-	return &clusterv1.PeerSet{Version: s.store.Version(), Peers: peers, HubAndSpoke: true}
+	return &clusterv1.PeerSet{Version: s.store.Version(), Peers: peers, HubAndSpoke: !selfControl}
 }
 
 func (s *JoinServer) apply(ctx context.Context, cmd *clusterv1.Command) error {

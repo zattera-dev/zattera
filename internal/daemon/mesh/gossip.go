@@ -88,11 +88,16 @@ func (d *eventDelegate) NotifyLeave(n *memberlist.Node) {
 
 func (d *eventDelegate) NotifyUpdate(*memberlist.Node) {}
 
+// gossipJoinRetry is how often a node re-attempts to join its peers until it
+// reaches at least one — the mesh tunnel may not be up the instant gossip starts.
+const gossipJoinRetry = 3 * time.Second
+
 // Gossip owns the running memberlist and its liveness tracker.
 type Gossip struct {
 	ml      *memberlist.Memberlist
 	tracker *tracker
 	log     *slog.Logger
+	stop    chan struct{}
 }
 
 // GossipConfig configures the gossip failure detector.
@@ -140,16 +145,35 @@ func NewGossip(cfg GossipConfig) (*Gossip, error) {
 	if err != nil {
 		return nil, fmt.Errorf("mesh: gossip create: %w", err)
 	}
-	g := &Gossip{ml: ml, tracker: tr, log: log}
+	g := &Gossip{ml: ml, tracker: tr, log: log, stop: make(chan struct{})}
 
+	// Join in the background, retrying until at least one peer is reached: the
+	// WireGuard tunnel to a peer is often not up the instant gossip starts, and
+	// memberlist's Join is one-shot — a single early failure would otherwise
+	// isolate this node from the cluster's gossip forever.
 	if peers := gossipJoinAddrs(cfg.Peers, cfg.NodeID, cfg.BindAddr); len(peers) > 0 {
-		if n, jerr := ml.Join(peers); jerr != nil {
-			// Non-fatal: peers may not be up yet; SWIM converges once they are.
-			log.Warn("mesh: gossip join incomplete", "reached", n, "peers", len(peers), "err", jerr)
-		}
+		go g.retryJoin(peers)
 	}
 	log.Info("mesh gossip up", "bind", cfg.BindAddr, "port", GossipPort)
 	return g, nil
+}
+
+// retryJoin re-attempts to join the peer set until it reaches at least one, or
+// Shutdown is called.
+func (g *Gossip) retryJoin(peers []string) {
+	for {
+		if n, err := g.ml.Join(peers); err == nil && n > 0 {
+			g.log.Info("mesh gossip joined", "peers", n)
+			return
+		} else {
+			g.log.Warn("mesh gossip join incomplete; retrying", "reached", n, "of", len(peers), "err", err)
+		}
+		select {
+		case <-g.stop:
+			return
+		case <-time.After(gossipJoinRetry):
+		}
+	}
 }
 
 // Snapshot returns the current gossip liveness view keyed by node id.
@@ -157,7 +181,16 @@ func (g *Gossip) Snapshot() map[string]nodehealth.GossipLiveness { return g.trac
 
 // Leave broadcasts a graceful departure, then Shutdown stops the listener.
 func (g *Gossip) Leave(timeout time.Duration) error { return g.ml.Leave(timeout) }
-func (g *Gossip) Shutdown() error                   { return g.ml.Shutdown() }
+
+// Shutdown stops the retry-join loop and the memberlist listener.
+func (g *Gossip) Shutdown() error {
+	select {
+	case <-g.stop:
+	default:
+		close(g.stop)
+	}
+	return g.ml.Shutdown()
+}
 
 // gossipSecret derives memberlist's 32-byte AES key from the cluster CA hash, so
 // only nodes that hold the cluster identity can participate.
