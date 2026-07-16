@@ -2008,6 +2008,32 @@ relay. **Test:** cloud — two full-cone-NAT'd meshsock workers establish a
 punched worker↔worker path (assert `direct`/`punched`, not `relay`); block UDP →
 verify relay fallback.
 
+### T-57c — meshsock bind lifecycle: WireGuard Send → net.ErrClosed on real infra
+Phase 6 · Depends: T-57 · Size: M
+**Symptom (found via `test/cloud/TestMeshsockRelay`):** on a real cluster the
+meshsock workers come up, register ALIVE, and punch coordination works
+(`RequestPunch`/`PunchStream` verified — log: "meshsock punch coordinated"), and
+the path state machine correctly escalates to the relay ("meshsock path fallback
+to relay"). BUT WireGuard handshakes then fail repeatedly with
+`Failed to send handshake initiation: use of closed network connection` — the
+meshsock `conn.Bind`'s UDP socket is closed (`Bind.Send` → `net.ErrClosed`), so
+no tunnel (direct, punched, or relay) can carry traffic. The bind works
+initially (the worker's AgentSync to control succeeds → it registers), then
+closes.
+**Does NOT reproduce in tests** — the meshsock unit + real-wireguard-go tunnel
+integration tests (over the NAT simulator) all pass, including a full Close+Open
+rebind. So this is a wireguard-go device-lifecycle interaction specific to the
+production path (multiple peers, frequent peersync `ApplyPeers`, real UDP
+socket).
+**Tried:** removing `listen_port` from `ApplyPeers` (wireguard-go rebinds the
+bind on every `listen_port` set) — necessary and correct, but did NOT fix it, so
+there is a second close trigger to find. **Next:** instrument `Bind.Open`/`Close`
+(log every call + caller) on a kept cloud VM; check whether wireguard-go calls
+`Open` on an already-open bind (my `Open` returns `ErrBindAlreadyOpen` — handle
+rebind idempotently), or closes on a receive error. Also: the cloud test host
+image lacks `ping` (`iputils-ping`) — install it or use a Go dial-based
+reachability check in `assertMeshReachable`.
+
 **old T-58 spec (for reference):**
 Phase 6 · Depends: T-57 · Size: L
 **Files:** `internal/daemon/mesh/relay/{server.go,client.go}`, tests
