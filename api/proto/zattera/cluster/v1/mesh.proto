@@ -13,6 +13,16 @@ service MeshService {
   // ReportObservedEndpoint: disco/STUN-lite result — control records the UDP
   // source address it observed for a node and folds it into PeerSets.
   rpc ReportObservedEndpoint(ReportObservedEndpointRequest) returns (ReportObservedEndpointResponse);
+  // PunchStream: a meshsock-capable node keeps this open so control can push
+  // PunchCommands to it (the "punch now" half of a coordinated simultaneous
+  // open). Holding the stream also marks the node punch-capable. (T-57)
+  rpc PunchStream(PunchStreamRequest) returns (stream PunchCommand);
+  // RequestPunch coordinates a hole punch with a target node: control pushes a
+  // PunchCommand to the target over its PunchStream and returns the target's
+  // endpoints + the shared punch time to the requester. coordinated=false when
+  // the target has no PunchStream (kernel-WG or offline) — the caller keeps the
+  // hub/relay path. (T-57)
+  rpc RequestPunch(RequestPunchRequest) returns (RequestPunchResponse);
 }
 
 message WatchPeersRequest {
@@ -51,4 +61,28 @@ message ReportObservedEndpointRequest {
 
 message ReportObservedEndpointResponse {
   bool accepted = 1;
+}
+
+message PunchStreamRequest {
+  string node_id = 1;
+}
+
+// PunchCommand tells the receiver to burst probes at `peer` (the node that
+// requested a punch with it) at time `punch_at`. Both sides bursting inside the
+// same window is what opens the NAT holes.
+message PunchCommand {
+  string peer_node_id = 1;
+  repeated string peer_endpoints = 2; // "ip:port" candidates to punch toward
+  google.protobuf.Timestamp punch_at = 3;
+}
+
+message RequestPunchRequest {
+  string node_id = 1;        // the requester (from mTLS identity; cross-checked)
+  string target_node_id = 2; // who to punch with
+}
+
+message RequestPunchResponse {
+  bool coordinated = 1;                // false: target not punch-capable
+  repeated string target_endpoints = 2; // the target's "ip:port" candidates
+  google.protobuf.Timestamp punch_at = 3;
 }

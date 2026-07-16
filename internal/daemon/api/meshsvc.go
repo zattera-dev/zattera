@@ -41,6 +41,9 @@ type MeshServer struct {
 
 	mu        sync.Mutex
 	endpoints map[string]observedEndpoint // node id → latest disco observation
+
+	// punch tracks live PunchStreams for control-coordinated hole punching (T-57).
+	punch *punchRegistry
 }
 
 type observedEndpoint struct {
@@ -64,6 +67,7 @@ func NewMeshServer(store *state.Store, raft Applier, clk clock.Clock, log *slog.
 		log:       log,
 		debounce:  defaultAssignmentDebounce,
 		endpoints: map[string]observedEndpoint{},
+		punch:     newPunchRegistry(),
 	}
 }
 

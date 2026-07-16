@@ -24,6 +24,8 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	MeshService_WatchPeers_FullMethodName             = "/zattera.cluster.v1.MeshService/WatchPeers"
 	MeshService_ReportObservedEndpoint_FullMethodName = "/zattera.cluster.v1.MeshService/ReportObservedEndpoint"
+	MeshService_PunchStream_FullMethodName            = "/zattera.cluster.v1.MeshService/PunchStream"
+	MeshService_RequestPunch_FullMethodName           = "/zattera.cluster.v1.MeshService/RequestPunch"
 )
 
 // MeshServiceClient is the client API for MeshService service.
@@ -35,6 +37,16 @@ type MeshServiceClient interface {
 	// ReportObservedEndpoint: disco/STUN-lite result — control records the UDP
 	// source address it observed for a node and folds it into PeerSets.
 	ReportObservedEndpoint(ctx context.Context, in *ReportObservedEndpointRequest, opts ...grpc.CallOption) (*ReportObservedEndpointResponse, error)
+	// PunchStream: a meshsock-capable node keeps this open so control can push
+	// PunchCommands to it (the "punch now" half of a coordinated simultaneous
+	// open). Holding the stream also marks the node punch-capable. (T-57)
+	PunchStream(ctx context.Context, in *PunchStreamRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[PunchCommand], error)
+	// RequestPunch coordinates a hole punch with a target node: control pushes a
+	// PunchCommand to the target over its PunchStream and returns the target's
+	// endpoints + the shared punch time to the requester. coordinated=false when
+	// the target has no PunchStream (kernel-WG or offline) — the caller keeps the
+	// hub/relay path. (T-57)
+	RequestPunch(ctx context.Context, in *RequestPunchRequest, opts ...grpc.CallOption) (*RequestPunchResponse, error)
 }
 
 type meshServiceClient struct {
@@ -74,6 +86,35 @@ func (c *meshServiceClient) ReportObservedEndpoint(ctx context.Context, in *Repo
 	return out, nil
 }
 
+func (c *meshServiceClient) PunchStream(ctx context.Context, in *PunchStreamRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[PunchCommand], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &MeshService_ServiceDesc.Streams[1], MeshService_PunchStream_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[PunchStreamRequest, PunchCommand]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type MeshService_PunchStreamClient = grpc.ServerStreamingClient[PunchCommand]
+
+func (c *meshServiceClient) RequestPunch(ctx context.Context, in *RequestPunchRequest, opts ...grpc.CallOption) (*RequestPunchResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RequestPunchResponse)
+	err := c.cc.Invoke(ctx, MeshService_RequestPunch_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // MeshServiceServer is the server API for MeshService service.
 // All implementations must embed UnimplementedMeshServiceServer
 // for forward compatibility.
@@ -83,6 +124,16 @@ type MeshServiceServer interface {
 	// ReportObservedEndpoint: disco/STUN-lite result — control records the UDP
 	// source address it observed for a node and folds it into PeerSets.
 	ReportObservedEndpoint(context.Context, *ReportObservedEndpointRequest) (*ReportObservedEndpointResponse, error)
+	// PunchStream: a meshsock-capable node keeps this open so control can push
+	// PunchCommands to it (the "punch now" half of a coordinated simultaneous
+	// open). Holding the stream also marks the node punch-capable. (T-57)
+	PunchStream(*PunchStreamRequest, grpc.ServerStreamingServer[PunchCommand]) error
+	// RequestPunch coordinates a hole punch with a target node: control pushes a
+	// PunchCommand to the target over its PunchStream and returns the target's
+	// endpoints + the shared punch time to the requester. coordinated=false when
+	// the target has no PunchStream (kernel-WG or offline) — the caller keeps the
+	// hub/relay path. (T-57)
+	RequestPunch(context.Context, *RequestPunchRequest) (*RequestPunchResponse, error)
 	mustEmbedUnimplementedMeshServiceServer()
 }
 
@@ -98,6 +149,12 @@ func (UnimplementedMeshServiceServer) WatchPeers(*WatchPeersRequest, grpc.Server
 }
 func (UnimplementedMeshServiceServer) ReportObservedEndpoint(context.Context, *ReportObservedEndpointRequest) (*ReportObservedEndpointResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ReportObservedEndpoint not implemented")
+}
+func (UnimplementedMeshServiceServer) PunchStream(*PunchStreamRequest, grpc.ServerStreamingServer[PunchCommand]) error {
+	return status.Errorf(codes.Unimplemented, "method PunchStream not implemented")
+}
+func (UnimplementedMeshServiceServer) RequestPunch(context.Context, *RequestPunchRequest) (*RequestPunchResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RequestPunch not implemented")
 }
 func (UnimplementedMeshServiceServer) mustEmbedUnimplementedMeshServiceServer() {}
 func (UnimplementedMeshServiceServer) testEmbeddedByValue()                     {}
@@ -149,6 +206,35 @@ func _MeshService_ReportObservedEndpoint_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _MeshService_PunchStream_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(PunchStreamRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(MeshServiceServer).PunchStream(m, &grpc.GenericServerStream[PunchStreamRequest, PunchCommand]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type MeshService_PunchStreamServer = grpc.ServerStreamingServer[PunchCommand]
+
+func _MeshService_RequestPunch_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RequestPunchRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MeshServiceServer).RequestPunch(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MeshService_RequestPunch_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MeshServiceServer).RequestPunch(ctx, req.(*RequestPunchRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // MeshService_ServiceDesc is the grpc.ServiceDesc for MeshService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -160,11 +246,20 @@ var MeshService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "ReportObservedEndpoint",
 			Handler:    _MeshService_ReportObservedEndpoint_Handler,
 		},
+		{
+			MethodName: "RequestPunch",
+			Handler:    _MeshService_RequestPunch_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "WatchPeers",
 			Handler:       _MeshService_WatchPeers_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "PunchStream",
+			Handler:       _MeshService_PunchStream_Handler,
 			ServerStreams: true,
 		},
 	},
