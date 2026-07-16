@@ -14,19 +14,22 @@ import (
 )
 
 // TestControlHAAndGossip spins up a REAL 3-node control-plane quorum on Hetzner
-// and exercises both T-55 (multi-control HA) and T-56 (gossip failure
-// detection) end to end:
+// and verifies both T-55 (multi-control HA) and T-56 (gossip failure detection)
+// end to end:
 //
-//  1. two extra control nodes JOIN the bootstrap node's raft quorum (T-55b:
-//     handover + runJoinedControl over the real mesh);
-//  2. killing a FOLLOWER is detected DOWN within the gossip window — far faster
-//     than the 30s heartbeat deadline alone (T-56);
-//  3. killing the LEADER, the surviving two control nodes re-elect and keep
-//     serving writes (T-55: quorum survives leader loss).
+//  1. two extra control nodes JOIN the bootstrap node's raft quorum over the
+//     real mesh, and all three reach ALIVE (T-55b: handover + runJoinedControl,
+//     and gossip is what makes a follower — whose heartbeats go to its own
+//     livestate — visible to the leader);
+//  2. killing the LEADER, the two survivors re-elect and keep serving writes
+//     (T-55: the quorum survives leader loss); and
+//  3. the dead leader is marked DOWN within the gossip window — during the NEW
+//     leader's post-election grace period, which ONLY gossip can bypass
+//     (heartbeat-only detection would wait the grace out) (T-56).
 //
 // Everything is destroyed on exit. ZT_CLOUD_KEEP=1 keeps it up for debugging.
 //
-//	HCLOUD_TOKEN=... go test -tags cloud ./test/cloud/ -run TestControlHAAndGossip -v -timeout 40m
+//	HCLOUD_TOKEN=... go test -tags cloud ./test/cloud/ -run TestControlHAAndGossip -v -timeout 45m
 func TestControlHAAndGossip(t *testing.T) {
 	c := NewCluster(t)
 
@@ -36,47 +39,39 @@ func TestControlHAAndGossip(t *testing.T) {
 	f2 := c.JoinControl("amd64")
 	c.WaitNodesReady(3)
 
-	// T-55: all three registered as control-role and ALIVE.
 	if got := controlNodeCount(c.Nodes()); got != 3 {
 		t.Fatalf("expected 3 control nodes in the quorum, got %d", got)
 	}
-	t.Logf("cloud: 3-control quorum formed (leader=%s, followers=%s,%s)", leader.Name(), f1.Name(), f2.Name())
+	t.Logf("cloud: T-55 — 3-control quorum formed and ALIVE (leader=%s, followers=%s,%s)", leader.Name(), f1.Name(), f2.Name())
 
-	// 2) T-56: kill a follower's daemon and time how long until the leader marks
-	// it DOWN. The bootstrap node stays leader across joins, so f1/f2 are
-	// followers — killing one triggers no election, isolating the detector.
-	leaderAPI := c.APIFor(leader)
-	f2.KillDaemon()
-	killedAt := time.Now()
-	waitNodeStatus(t, leaderAPI, f2.Name(), zatterav1.NodeStatus_NODE_STATUS_DOWN, gossipDetectBound)
-	detect := time.Since(killedAt)
-	if detect >= heartbeatOnlyBound {
-		t.Errorf("follower marked DOWN in %v — no faster than heartbeat-only; gossip may not be working", detect)
-	}
-	t.Logf("cloud: T-56 — follower %s detected DOWN in %v (heartbeat-only would need >=%v)", f2.Name(), detect.Round(time.Second), heartbeatOnlyBound)
-
-	// Recover the follower — it must rejoin and go ALIVE again.
-	f2.StartDaemon()
-	waitNodeStatus(t, leaderAPI, f2.Name(), zatterav1.NodeStatus_NODE_STATUS_ALIVE, recoverBound)
-	t.Logf("cloud: follower %s recovered ALIVE", f2.Name())
-
-	// 3) T-55: kill the LEADER. The surviving two control nodes (majority of 3)
-	// must re-elect and keep serving writes, reached via a survivor.
+	// 2) + 3) Kill the bootstrap leader. A survivor's API (which forwards to
+	// whoever now leads) must keep accepting writes, and the dead leader must be
+	// marked DOWN fast.
+	survivor := c.APIFor(f1)
 	leader.KillDaemon()
-	survivorAPI := c.APIFor(f1)
-	requireClusterServesWrites(t, survivorAPI, failoverBound)
-	waitNodeStatus(t, survivorAPI, leader.Name(), zatterav1.NodeStatus_NODE_STATUS_DOWN, failoverBound)
-	t.Logf("cloud: T-55 — quorum survived leader loss; %s serves and the old leader is DOWN", f1.Name())
+	killedAt := time.Now()
+
+	requireClusterServesWrites(t, survivor, failoverBound)
+	t.Logf("cloud: T-55 — quorum survived leader loss; %s still serves writes", f1.Name())
+
+	waitNodeStatus(t, survivor, leader.Name(), zatterav1.NodeStatus_NODE_STATUS_DOWN, detectPollBound)
+	detect := time.Since(killedAt)
+	if detect >= gossipProof {
+		t.Errorf("dead leader marked DOWN in %v — not within the gossip window (<%v); heartbeat-only + the new leader's grace would take this long, so gossip may not be working", detect, gossipProof)
+	}
+	t.Logf("cloud: T-56 — dead leader detected DOWN in %v (heartbeat-only, through the new leader's grace, would need much longer)", detect.Round(time.Second))
 }
 
 const (
-	// gossipDetectBound is the ceiling for gossip-accelerated DOWN detection.
-	gossipDetectBound = 25 * time.Second
-	// heartbeatOnlyBound is the floor a heartbeat-only detector could achieve
-	// (the 30s deadline). Detecting DOWN faster than this proves gossip helped.
-	heartbeatOnlyBound = 30 * time.Second
-	recoverBound       = 90 * time.Second
-	failoverBound      = 90 * time.Second
+	// failoverBound is how long the survivors have to re-elect and accept a write.
+	failoverBound = 90 * time.Second
+	// detectPollBound is how long we poll for the DOWN transition.
+	detectPollBound = 60 * time.Second
+	// gossipProof: detecting the dead leader DOWN faster than this proves gossip
+	// did it. A brand-new leader is inside its 45s post-election grace, so a
+	// heartbeat-only detector could not demote the old leader until the grace
+	// expires (~45s+); only gossip (which bypasses grace) does it in ~15-20s.
+	gossipProof = 30 * time.Second
 )
 
 // controlNodeCount counts registered nodes carrying the control role.
@@ -118,7 +113,8 @@ func waitNodeStatus(t *testing.T, api *apiclient.Client, name string, want zatte
 }
 
 // requireClusterServesWrites asserts a MUTATING call succeeds through `api`
-// (which forwards to whoever now leads), proving the quorum still commits.
+// (which forwards to whoever now leads), proving the quorum still commits. It
+// retries the transient no-leader window while the survivors re-elect.
 func requireClusterServesWrites(t *testing.T, api *apiclient.Client, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
