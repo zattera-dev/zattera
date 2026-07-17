@@ -2472,7 +2472,7 @@ volume snapshot restorable.
 **Acceptance:** `go test -tags integration -run TestDisasterRecovery
 ./test/integration/ -timeout 20m`
 
-### T-67 — Cron jobs
+### T-67 — Cron jobs  ✅ **DONE**
 Phase 6 · Depends: T-53 · Size: M
 **Files:** `internal/daemon/scheduler/cron.go`, `cron_test.go`,
 `internal/cli/cron.go`

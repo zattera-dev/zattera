@@ -126,9 +126,9 @@ No ports declared = one `http` port on `8080`.
 `name` + `mount_path`, both required. Declares a node-pinned persistent volume
 for a `stateful` service. See [Volumes](../data/volumes).
 
-### `[[cron]]` *(scheduling is work in progress)*
+### `[[cron]]`
 
-Global cron entries, overridable per environment with `[[env.<name>.cron]]`: `name`, `schedule` (5-field cron), `command`, `concurrency` (`forbid` default / `replace` / `allow`), `max_retries`. The parser accepts these today; the cron scheduler ships with T-67 — see [Jobs](../operations/jobs).
+Global cron entries, overridable per environment with `[[env.<name>.cron]]`: `name`, `schedule` (5-field cron), `command`, `concurrency` (`forbid` default / `replace` / `allow`), `max_retries`. The leader fires each due schedule as a one-shot job in the environment's active-release image; inspect with `zt cron ls`. See [Jobs & cron](../operations/jobs#cron).
 
 ## How it's applied
 

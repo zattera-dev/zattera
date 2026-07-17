@@ -82,6 +82,7 @@ Defaults to `--env production`. See [Jobs](../operations/jobs).
 | ------- | ----------- |
 | `zt jobs run [app] [--max-retries N] [--no-wait] -- <command…>` | One-shot job in the env's active release image; waits and exits with the job's exit code |
 | `zt jobs ls [app] [--env NAME]` | Recent jobs: status, exit code, attempt, command |
+| `zt cron ls [app] [--env NAME]` | Cron schedules from `zattera.toml`: next run + last run's status |
 
 ## Volumes
 

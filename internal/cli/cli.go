@@ -47,6 +47,7 @@ func Commands() []*cobra.Command {
 		newFsCmd(),
 		newStatsCmd(),
 		newJobsCmd(),
+		newCronCmd(),
 		newVolumesCmd(),
 		newBackupCmd(),
 	}

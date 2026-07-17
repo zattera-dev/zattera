@@ -27,6 +27,26 @@ A job is scheduled like a service instance — placed on a node with capacity by
 
 ## Cron
 
-::: callout warning Work in progress
-Scheduled (cron) jobs are on the [roadmap](../roadmap/tasks) (T-67). The [`[[cron]]` sections in zattera.toml](../deploy/zattera-toml#cron-scheduling-is-work-in-progress) — schedule, command, concurrency policy (`forbid`/`replace`/`allow`), retries — are already parsed and stored, and will drive the cron scheduler when it ships. Until then, trigger `zt jobs run` from an external scheduler.
-:::
+Declare scheduled runs with [`[[cron]]` sections in zattera.toml](../deploy/zattera-toml#cron) — `name`, `schedule` (5-field cron), `command`, `concurrency` policy, and `max_retries`:
+
+```toml
+[[cron]]
+name = "nightly-report"
+schedule = "0 2 * * *"      # 02:00 every day
+command = "./bin/report"
+concurrency = "forbid"       # forbid (default) | replace | allow
+max_retries = 2
+```
+
+```bash
+zt cron ls api               # each schedule: next run + last run's status
+zt cron ls api --env staging # limit to one environment
+```
+
+### How it works
+
+The leader evaluates every environment's schedules on a sub-minute tick. When a slot is due it enqueues a normal one-shot [job](#how-it-works) tagged with the cron name — so a cron run behaves exactly like `zt jobs run` (active-release image, sealed env vars, retries, `job/<id>` logs), and `zt jobs ls --env <env>` shows the history.
+
+- **Concurrency policy** governs what happens when a slot arrives while the previous run is still active: `forbid` (default) skips the new run, `replace` cancels the active run and starts fresh, `allow` runs them concurrently.
+- **Jitter.** Each schedule gets a deterministic 0–30s offset (hashed from env + cron name) so distinct crons sharing a slot don't all place at once.
+- **Failover.** Next-run is always computed forward from the moment a node becomes leader — slots missed during a leader election are **not** replayed (a cron guarantees at-most-once per slot, not catch-up). For guaranteed backfill, make the command idempotent and reconcile from within it.

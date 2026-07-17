@@ -31,6 +31,12 @@ type Scheduler struct {
 	store *raftstore.Store
 	clock clock.Clock
 	log   *slog.Logger
+
+	// cron firing state, reset per leader term (T-67). cronLast is the last
+	// scheduled slot fired per (env, cron name); cronEpoch is the term start, the
+	// floor for computing next-run so missed slots are not replayed on failover.
+	cronLast  map[string]time.Time
+	cronEpoch time.Time
 }
 
 // New builds the scheduler.
@@ -52,6 +58,9 @@ func (s *Scheduler) Run(ctx context.Context) {
 
 // leaderLoop runs the watch+tick evaluation until leadership is lost or ctx ends.
 func (s *Scheduler) leaderLoop(ctx context.Context) {
+	// Fresh cron epoch each term: next-run is computed forward from now, so
+	// slots missed before we became leader are not replayed (T-67).
+	s.resetCron()
 	sub := s.store.State().Watch(
 		state.KindEnvironment, state.KindRelease, state.KindDeployment,
 		state.KindNode, state.KindAssignment, state.KindVolume, state.KindJob,
@@ -112,6 +121,11 @@ func (s *Scheduler) evaluate(ctx context.Context) error {
 	}
 	// Allocate/free a service VIP per environment that exposes a port (T-48).
 	if err := s.reconcileVIPs(ctx, st); err != nil {
+		return err
+	}
+	// Fire due cron schedules into one-shot jobs (T-67) before reconcileJobs so
+	// a freshly enqueued (or REPLACE-canceled) run is placed/reaped this pass.
+	if err := s.reconcileCron(ctx, st); err != nil {
 		return err
 	}
 	// Place and drive one-shot jobs (T-53).
