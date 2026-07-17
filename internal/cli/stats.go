@@ -4,20 +4,25 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	zatterav1 "github.com/zattera-dev/zattera/api/gen/zattera/v1"
 )
 
 func newStatsCmd() *cobra.Command {
 	var nodesFlag bool
-	var app string
+	var app, node string
+	var since, step time.Duration
 	cmd := &cobra.Command{
 		Use:   "stats",
-		Short: "Show live resource stats (current values from heartbeats)",
-		Long: "Live stats sampled from node heartbeats. By default (or with --nodes)\n" +
-			"shows per-node CPU/memory/disk; with --app shows per-environment traffic.",
+		Short: "Show resource stats (current values, or history with --since)",
+		Long: "Stats from node heartbeats (current) or the embedded TSDB (history).\n" +
+			"By default (or with --nodes) shows per-node CPU/memory/disk; with --app\n" +
+			"shows per-environment traffic. Pass --since (e.g. 1h) to render history as\n" +
+			"sparklines instead of a single current value.",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			client, cctx, err := clientFromContext()
 			if err != nil {
@@ -27,7 +32,7 @@ func newStatsCmd() *cobra.Command {
 			ctx, cancel := cmdContext(cmd)
 			defer cancel()
 
-			q := &zatterav1.StatsQuery{}
+			q := &zatterav1.StatsQuery{NodeId: node}
 			appMode := app != ""
 			if appMode {
 				proj, err := projectName(cctx)
@@ -41,6 +46,16 @@ func newStatsCmd() *cobra.Command {
 				q.AppId = got.GetApp().GetMeta().GetId()
 			}
 
+			historical := since > 0
+			if historical {
+				now := time.Now()
+				q.Since = timestamppb.New(now.Add(-since))
+				q.Until = timestamppb.New(now)
+				if step > 0 {
+					q.StepSeconds = uint32(step / time.Second)
+				}
+			}
+
 			resp, err := client.Metrics.Stats(ctx, q)
 			if err != nil {
 				return apiError(err)
@@ -50,16 +65,23 @@ func newStatsCmd() *cobra.Command {
 				return p.EmitJSON(resp.GetSeries())
 			}
 			_ = nodesFlag // --nodes is the default view
+			scopeLabel, cols := "node", nodeMetricCols
 			if appMode {
-				renderStatsTable(p.Table, resp.GetSeries(), "env", envMetricCols)
+				scopeLabel, cols = "env", envMetricCols
+			}
+			if historical {
+				renderStatsHistory(p.Table, resp.GetSeries(), scopeLabel, cols)
 			} else {
-				renderStatsTable(p.Table, resp.GetSeries(), "node", nodeMetricCols)
+				renderStatsTable(p.Table, resp.GetSeries(), scopeLabel, cols)
 			}
 			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&nodesFlag, "nodes", false, "show per-node stats (default)")
 	cmd.Flags().StringVar(&app, "app", "", "show per-environment traffic stats for this app")
+	cmd.Flags().StringVar(&node, "node", "", "show stats for a single node id")
+	cmd.Flags().DurationVar(&since, "since", 0, "show history over this window (e.g. 1h, 30m) as sparklines")
+	cmd.Flags().DurationVar(&step, "step", 0, "resolution for --since (e.g. 15s, 5m); default is the server's raw step")
 	addProjectFlag(cmd)
 	return cmd
 }
@@ -150,4 +172,82 @@ func fmtBytes(v float64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f%cB", v/div, "KMGT"[exp])
+}
+
+// sparkBlocks ramps from lowest to highest for the eight-level sparkline.
+var sparkBlocks = []rune("▁▂▃▄▅▆▇█")
+
+// sparkline renders a series of values as a unicode block trend, normalized to
+// the series' own min/max (a flat series renders as the lowest block).
+func sparkline(vals []float64) string {
+	if len(vals) == 0 {
+		return ""
+	}
+	min, max := vals[0], vals[0]
+	for _, v := range vals {
+		if v < min {
+			min = v
+		}
+		if v > max {
+			max = v
+		}
+	}
+	span := max - min
+	var b strings.Builder
+	for _, v := range vals {
+		idx := 0
+		if span > 0 {
+			idx = int((v-min)/span*float64(len(sparkBlocks)-1) + 0.5)
+		}
+		if idx < 0 {
+			idx = 0
+		} else if idx >= len(sparkBlocks) {
+			idx = len(sparkBlocks) - 1
+		}
+		b.WriteRune(sparkBlocks[idx])
+	}
+	return b.String()
+}
+
+// renderStatsHistory renders one row per series: the scoped entity, the metric,
+// a sparkline of its points over the window, and the latest value.
+func renderStatsHistory(table func([]string, [][]string), series []*zatterav1.Series, scopeLabel string, cols []statsColumn) {
+	byMetric := map[string]statsColumn{}
+	for _, c := range cols {
+		byMetric[c.metric] = c
+	}
+
+	sorted := append([]*zatterav1.Series(nil), series...)
+	sort.Slice(sorted, func(i, j int) bool {
+		li, lj := sorted[i].GetLabels()[scopeLabel], sorted[j].GetLabels()[scopeLabel]
+		if li != lj {
+			return li < lj
+		}
+		return sorted[i].GetMetric() < sorted[j].GetMetric()
+	})
+
+	headers := []string{strings.ToUpper(scopeLabel), "METRIC", "TREND", "LAST"}
+	rows := make([][]string, 0, len(sorted))
+	for _, s := range sorted {
+		id := s.GetLabels()[scopeLabel]
+		if id == "" {
+			continue
+		}
+		pts := s.GetPoints()
+		vals := make([]float64, 0, len(pts))
+		for _, p := range pts {
+			vals = append(vals, p.GetValue())
+		}
+		col, ok := byMetric[s.GetMetric()]
+		header, format := s.GetMetric(), fmtFloat
+		if ok {
+			header, format = col.header, col.format
+		}
+		last := "-"
+		if len(vals) > 0 {
+			last = format(vals[len(vals)-1])
+		}
+		rows = append(rows, []string{shortID(id), header, sparkline(vals), last})
+	}
+	table(headers, rows)
 }

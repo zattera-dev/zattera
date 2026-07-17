@@ -2,13 +2,25 @@ package api
 
 import (
 	"context"
+	"log/slog"
 	"sort"
+	"time"
 
 	zatterav1 "github.com/zattera-dev/zattera/api/gen/zattera/v1"
 	"github.com/zattera-dev/zattera/internal/daemon/livestate"
 	"github.com/zattera-dev/zattera/internal/pkgutil/clock"
 	"github.com/zattera-dev/zattera/internal/state"
 )
+
+// statsNodeTimeout bounds a per-node historical query so a dead node can't hang
+// the fan-out.
+const statsNodeTimeout = 3 * time.Second
+
+// StatsDialer queries one node's AgentLocalService.Stats (over the mesh in
+// production; a fake in tests). nil disables the historical path.
+type StatsDialer interface {
+	Stats(ctx context.Context, node *zatterav1.Node, q *zatterav1.StatsQuery) (*zatterav1.StatsResponse, error)
+}
 
 // Node-level metrics served from the latest heartbeat.
 var nodeMetrics = []string{"cpu_percent", "memory_bytes", "memory_percent", "disk_bytes", "disk_percent"}
@@ -24,19 +36,33 @@ type MetricsServer struct {
 	store *state.Store
 	live  *livestate.Registry
 	clk   clock.Clock
+	dial  StatsDialer
+	log   *slog.Logger
 }
 
-// NewMetricsServer builds the live metrics service.
-func NewMetricsServer(store *state.Store, live *livestate.Registry, clk clock.Clock) *MetricsServer {
+// NewMetricsServer builds the metrics service. dial enables the historical
+// (TSDB) path — a query with a `since` bound fans out to the nodes' local ring
+// TSDBs (T-60); a nil dial keeps only the live path. clk/log default when nil.
+func NewMetricsServer(store *state.Store, live *livestate.Registry, dial StatsDialer, clk clock.Clock, log *slog.Logger) *MetricsServer {
 	if clk == nil {
 		clk = clock.Real{}
 	}
-	return &MetricsServer{store: store, live: live, clk: clk}
+	if log == nil {
+		log = slog.Default()
+	}
+	return &MetricsServer{store: store, live: live, clk: clk, dial: dial, log: log}
 }
 
 // Stats returns single-point series scoped to a node, environment, app, or the
 // whole cluster (empty scope → all nodes).
-func (s *MetricsServer) Stats(_ context.Context, q *zatterav1.StatsQuery) (*zatterav1.StatsResponse, error) {
+func (s *MetricsServer) Stats(ctx context.Context, q *zatterav1.StatsQuery) (*zatterav1.StatsResponse, error) {
+	// A query with a time range reads history from the nodes' ring TSDBs; without
+	// one (or without a configured dialer) it serves current values from
+	// livestate — same series shape either way.
+	if q.GetSince() != nil && s.dial != nil {
+		return s.statsHistory(ctx, q)
+	}
+
 	nowMs := s.clk.Now().UnixMilli()
 	want := metricFilter(q.GetMetrics())
 

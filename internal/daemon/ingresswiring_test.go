@@ -92,7 +92,7 @@ func TestIngressServeRedirect(t *testing.T) {
 	}
 	httpAddr, httpsAddr := freeAddr(t), freeAddr(t)
 	if err := serveIngress(ctx, configForIngress{HTTPListen: httpAddr, HTTPSListen: httpsAddr},
-		src, tm, false /* redirect on */, "n1", clock.Real{}, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+		src, tm, false /* redirect on */, "n1", clock.Real{}, nil, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
 		t.Fatalf("serveIngress: %v", err)
 	}
 

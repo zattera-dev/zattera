@@ -13,8 +13,9 @@ something runnable.
 > are done and **verified GREEN on a real 3-node Hetzner cluster**
 > (`test/cloud/ha_test.go`: quorum forms, leader-kill failover, dead node DOWN
 > in ~19s). Remaining T-55b polish (control mesh-hub for workers,
-> leadership-reactive device loops) is optional. Next up: T-57 (meshsock) or
-> T-59 (metrics).
+> leadership-reactive device loops) is optional. **T-57/T-57c** (meshsock) and
+> **T-59/T-60** (ring TSDB metrics sampler + historical stats API/CLI) are done.
+> Next up: T-61 (autoscaler) or T-62 (volumes).
 
 ## What already exists (do not rebuild)
 
@@ -2102,17 +2103,40 @@ tests across wrap-around; series cardinality bounded (instances come and go
 load, GC.
 **Acceptance:** `go test ./internal/daemon/tsdb/`
 
-### T-60 — Historical stats API + CLI
+### T-60 — Historical stats API + CLI  ✅ **DONE**
 Phase 6 · Depends: T-59, T-41 · Size: M
+**Landed:**
+- **Proxy env-series feed (T-59 deferral):** the ingress L7's `proxy.Stats` is
+  surfaced out of `serveIngress` via a `statsSink` callback threaded through
+  `startDevIngress`/`startProdIngress`; `runControlPlane` holds it in an
+  `atomic.Pointer[proxy.Stats]` and passes `agent.Config.ProxyStats =
+  proxyStats.Snapshot`, so the sampler now records `rps`/`latency_p50_ms`/
+  `latency_p99_ms`/`error_rate`/`inflight` on the ingress node.
+- **Agent side:** `agent.StatsServer` (`internal/daemon/agent/statsserver.go`)
+  serves `AgentLocalService.Stats` from the node's local ring TSDB — scope filter
+  (node → its node series; env/app → env proxy + all instance series; cluster →
+  node series), metric filter, `[since,until]` at the resolution nearest
+  `step_seconds`. Wired into `LocalServer` + `startAgentLocalServer`.
+- **Control side:** `MetricsServer.Stats` routes a query WITH a `since` bound to
+  `statsHistory` (`internal/daemon/api/metricshistory.go`): a `StatsDialer`
+  (`GRPCStatsDialer`) fans out to the relevant nodes concurrently (3s per-node
+  timeout, partial on error) and merges — node/cluster concatenate; env/app fold
+  env proxy series + per-instance series (mapped instance→env from state) into
+  env-level series, summing `rps`/`inflight`/`memory_bytes`/`net_*` and averaging
+  cpu/rates/latencies per timestamp. A query without `since` keeps the live
+  (heartbeat) path unchanged.
+- **CLI:** `zattera stats` gains `--since`/`--step`/`--node`; historical mode
+  renders each series as an eight-level unicode sparkline (`▁▂▃▄▅▆▇█`) with the
+  latest value, `--json` returns raw series.
+**Tests:** `TestStatsHistory` (api, acceptance — node/cluster/env/app scopes +
+aggregation + live fallback, backed by real per-node TSDBs), `TestStatsServer*`
+(agent scope/metric filter), `TestSparkline` (cli). Live-path `TestStatsLive`
+still green.
+**Acceptance:** `go test ./internal/daemon/api/ -run TestStatsHistory` ✅
+**Original spec below.**
 **Files:** `internal/daemon/api/metricssvc.go` (extend),
 `internal/cli/stats.go` (extend)
 **Steps:**
-0. Pick up the T-59 deferral: feed the proxy env-series into the metrics
-   sampler. Surface the ingress L7's `proxy.Stats` (built in `serveIngress`,
-   `internal/daemon/ingresswiring.go`) up to the node agent and pass it as
-   `agent.Config.ProxyStats` (the sampler already records `rps`,
-   `latency_p50_ms`, `latency_p99_ms`, `error_rate`, `inflight` when set). Only
-   the ingress-running node has an L7; that is where the request counters live.
 1. `Stats` with a time range: fan out to the relevant nodes'
    `AgentLocalService.Stats` (agents serve their local TSDB), merge series
    (concat by scope — node series live on that node; env series merge by

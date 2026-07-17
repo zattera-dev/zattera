@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -332,19 +333,24 @@ func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store
 	// Ingress: serve HTTP/HTTPS and route to app instances via the live route
 	// snapshot. Dev (T-54) uses self-signed certs on unprivileged ports;
 	// production (T-89) binds :80/:443 with ACME certificates.
+	//
+	// proxyStats holds the L7 proxy's per-env counters once ingress is up, so the
+	// metrics sampler (T-59/T-60) can record env-scoped series from them.
+	var proxyStats atomic.Pointer[proxy.Stats]
+	statsSink := func(s *proxy.Stats) { proxyStats.Store(s) }
 	switch {
 	case cfg.Ingress.Disabled:
 		// explicitly off
 	case cfg.Dev:
 		if err := startDevIngress(ctx, configForIngress{
 			HTTPListen: cfg.Ingress.HTTPListen, HTTPSListen: cfg.Ingress.HTTPSListen,
-		}, routeBuilder, authority, nodeID, clk, log); err != nil {
+		}, routeBuilder, authority, nodeID, clk, statsSink, log); err != nil {
 			log.Warn("ingress failed to start", "err", err)
 		}
 	case prodTM == nil:
 		log.Warn("production ingress needs a TLS manager; ingress disabled")
 	default:
-		if err := startProdIngress(ctx, cfg, routeSource, prodTM, nodeID, clk, log); err != nil {
+		if err := startProdIngress(ctx, cfg, routeSource, prodTM, nodeID, clk, statsSink, log); err != nil {
 			log.Warn("ingress failed to start", "err", err)
 		}
 	}
@@ -382,7 +388,7 @@ func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store
 		AuditService:      auditor,
 		LogService:        api.NewLogServer(st, api.GRPCLogDialer{Connect: agentLocalConnect}, clk, log),
 		ExecService:       api.NewExecServer(st, api.GRPCExecDialer{Connect: agentLocalConnect}, log),
-		MetricsService:    api.NewMetricsServer(st, live, clk),
+		MetricsService:    api.NewMetricsServer(st, live, api.GRPCStatsDialer{Connect: agentLocalConnect}, clk, log),
 		JobService:        api.NewJobServer(st, rs, clk),
 		AgentSyncService:  syncSrv,
 		JoinService:       joinSrv,
@@ -532,6 +538,12 @@ func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store
 			RegistryAuth: selfRegAuth,
 			Dial:         localAgentDialer(authority, nodeID, cfg.API.Listen, log),
 			Store:        metricsStore,
+			ProxyStats: func() map[string]*clusterv1.ProxySample {
+				if s := proxyStats.Load(); s != nil {
+					return s.Snapshot()
+				}
+				return nil
+			},
 		})
 		go func() {
 			if err := na.Run(ctx); err != nil && ctx.Err() == nil {
@@ -564,7 +576,9 @@ func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store
 			if selfRegAuth != nil {
 				pushAuth = builder.RegistryAuth{Registry: selfRegAuth.ServerAddress, Username: selfRegAuth.Username, Password: selfRegAuth.Password}
 			}
-			if err := startAgentLocalServer(ctx, authority, cfg, nodeID, rt, clk, logSrv, pushAuth, log); err != nil {
+			// Serve this node's historical metrics from its ring TSDB (T-60).
+			statsSrv := agent.NewStatsServer(metricsStore, nodeID, clk)
+			if err := startAgentLocalServer(ctx, authority, cfg, nodeID, rt, clk, logSrv, statsSrv, pushAuth, log); err != nil {
 				log.Warn("agent-local service failed to start", "err", err)
 			}
 		}
@@ -1136,7 +1150,7 @@ func newAgentLocalConnect(authority *ca.CA, nodeID string, _ *slog.Logger) func(
 // mTLS) serving builds + exec/top/port-forward. The build sub-server needs a
 // container runtime + a source fetcher that pulls tarballs from the control
 // blob endpoint over the same node identity.
-func startAgentLocalServer(ctx context.Context, authority *ca.CA, cfg config.Config, nodeID string, rt crt.ContainerRuntime, clk clock.Clock, logSrv *agent.LogServer, pushAuth builder.RegistryAuth, log *slog.Logger) error {
+func startAgentLocalServer(ctx context.Context, authority *ca.CA, cfg config.Config, nodeID string, rt crt.ContainerRuntime, clk clock.Clock, logSrv *agent.LogServer, statsSrv *agent.StatsServer, pushAuth builder.RegistryAuth, log *slog.Logger) error {
 	tlsCfg := nodeClientTLS(authority, nodeID, "127.0.0.1")
 	fetch := agent.HTTPSourceFetcher{Client: &http.Client{
 		Timeout:   10 * time.Minute,
@@ -1154,7 +1168,7 @@ func startAgentLocalServer(ctx context.Context, authority *ca.CA, cfg config.Con
 		Logger:           log,
 	})
 	execSrv := agent.NewExecServer(rt, log)
-	local := agent.NewLocalServer(buildSrv, execSrv, logSrv)
+	local := agent.NewLocalServer(buildSrv, execSrv, logSrv, statsSrv)
 
 	serverTLS, err := authority.ServerTLSConfig([]string{"localhost"}, agentLocalIPs(cfg))
 	if err != nil {

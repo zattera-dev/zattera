@@ -50,7 +50,7 @@ func TestStatsLive(t *testing.T) {
 	st.PutApp(&zatterav1.App{Meta: &zatterav1.Meta{Id: "app1"}, Name: "web", ProjectId: "p1"})
 	st.PutEnvironment(&zatterav1.Environment{Meta: &zatterav1.Meta{Id: "env1"}, AppId: "app1", ProjectId: "p1", Name: "production"})
 
-	s := NewMetricsServer(st, live, clk)
+	s := NewMetricsServer(st, live, nil, clk, nil)
 	ctx := context.Background()
 
 	// Cluster (empty scope) → per-node metrics.

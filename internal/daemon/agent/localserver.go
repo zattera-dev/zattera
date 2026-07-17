@@ -21,13 +21,14 @@ type LocalServer struct {
 	build *BuildServer
 	exec  *ExecServer
 	logs  *LogServer
+	stats *StatsServer
 }
 
 // NewLocalServer builds the composite. Any sub-server may be nil (e.g. a
 // non-builder node passes build=nil); the corresponding methods then report
 // Unimplemented via the embedded base.
-func NewLocalServer(build *BuildServer, exec *ExecServer, logs *LogServer) *LocalServer {
-	return &LocalServer{build: build, exec: exec, logs: logs}
+func NewLocalServer(build *BuildServer, exec *ExecServer, logs *LogServer, stats *StatsServer) *LocalServer {
+	return &LocalServer{build: build, exec: exec, logs: logs, stats: stats}
 }
 
 // QueryLogs dispatches to the log sub-server.
@@ -60,6 +61,14 @@ func (s *LocalServer) Exec(stream grpc.BidiStreamingServer[clusterv1.AgentExecIn
 		return s.UnimplementedAgentLocalServiceServer.Exec(stream)
 	}
 	return s.exec.Exec(stream)
+}
+
+// Stats dispatches to the stats sub-server (local ring TSDB, T-60).
+func (s *LocalServer) Stats(ctx context.Context, q *zatterav1.StatsQuery) (*zatterav1.StatsResponse, error) {
+	if s.stats == nil {
+		return s.UnimplementedAgentLocalServiceServer.Stats(ctx, q)
+	}
+	return s.stats.Stats(ctx, q)
 }
 
 // Top dispatches to the exec sub-server.

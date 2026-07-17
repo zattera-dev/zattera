@@ -61,7 +61,7 @@ Defaults to `--env staging`; `--prod` = `--env production`. See [Deploying](../d
 | ------- | ----------- |
 | `zt ps [--app NAME]` | Running instances: app, env, release, node, state, restarts |
 | `zt logs [app] [--env NAME] [--since 10m] [-f]` | Stream logs across instances, color-coded per instance |
-| `zt stats [--nodes \| --app NAME]` | Live stats from heartbeats: node CPU/mem/disk, or per-env traffic (RPS, in-flight, error %, p50/p99) |
+| `zt stats [--nodes \| --app NAME \| --node ID] [--since 1h] [--step 5m]` | Stats: current values from heartbeats, or history from the TSDB with `--since` (rendered as sparklines) |
 
 ## Remote debugging
 
