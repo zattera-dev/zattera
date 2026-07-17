@@ -2114,6 +2114,13 @@
             "$ref": "#/definitions/v1ServiceSpec"
           },
           "title": "environment name → spec, from zattera.toml [env.*] sections"
+        },
+        "idleTimeouts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "environment name → scale-to-zero idle window (lives on Environment, not\nServiceSpec). Absent = leave the env's current idle_timeout untouched."
         }
       }
     },

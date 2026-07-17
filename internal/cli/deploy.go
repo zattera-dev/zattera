@@ -251,6 +251,7 @@ func deploySource(ctx context.Context, client *apiclient.Client, p *ui.Printer, 
 	}
 	if _, aerr := client.Apps.ApplyAppConfig(ctx, &zatterav1.ApplyAppConfigRequest{
 		ProjectId: proj, AppId: ac.Name, Build: ac.Build, Github: ac.GitHub, Environments: ac.Services,
+		IdleTimeouts: idleTimeoutsProto(ac.IdleTimeouts),
 	}); aerr != nil {
 		return apiError(aerr)
 	}

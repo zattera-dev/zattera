@@ -2,12 +2,27 @@ package cli
 
 import (
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	zatterav1 "github.com/zattera-dev/zattera/api/gen/zattera/v1"
 	"github.com/zattera-dev/zattera/internal/appconfig"
 )
+
+// idleTimeoutsProto converts parsed per-env idle windows to the wire form
+// ApplyAppConfigRequest expects (nil when none are set).
+func idleTimeoutsProto(m map[string]time.Duration) map[string]*durationpb.Duration {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]*durationpb.Duration, len(m))
+	for name, d := range m {
+		out[name] = durationpb.New(d)
+	}
+	return out
+}
 
 func newApplyCmd() *cobra.Command {
 	var file string
@@ -47,6 +62,7 @@ func newApplyCmd() *cobra.Command {
 				Build:        ac.Build,
 				Github:       ac.GitHub,
 				Environments: ac.Services,
+				IdleTimeouts: idleTimeoutsProto(ac.IdleTimeouts),
 			})
 			if err != nil {
 				return apiError(err)

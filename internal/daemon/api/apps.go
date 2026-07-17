@@ -137,6 +137,12 @@ func (s *AppServer) ApplyAppConfig(ctx context.Context, req *zatterav1.ApplyAppC
 		if !validDNSName(name) {
 			return nil, status.Errorf(codes.InvalidArgument, "environment name %q is not DNS-safe", name)
 		}
+		// Scale-to-zero and stateful are mutually exclusive: a stateful service
+		// holds a single-writer volume lease and must not be torn down on idle
+		// (T-69). Reject the combination up front.
+		if spec.GetScaleToZero() && spec.GetStateful() {
+			return nil, status.Errorf(codes.InvalidArgument, "environment %q: scale_to_zero cannot be combined with stateful", name)
+		}
 		env, ok := s.store.EnvironmentByName(app.GetMeta().GetId(), name)
 		if ok {
 			env = clone(env)
@@ -150,6 +156,19 @@ func (s *AppServer) ApplyAppConfig(ctx context.Context, req *zatterav1.ApplyAppC
 				Name:      name,
 				Type:      envTypeForName(name),
 				Service:   spec,
+			}
+		}
+		if idle, ok := req.GetIdleTimeouts()[name]; ok {
+			env.IdleTimeout = idle
+		}
+		// Seed a scale-to-zero env's effective count to min so it runs after an
+		// apply/deploy; effective_replicas=0 then unambiguously means the
+		// scale-to-zero loop cooled it down (see desiredReplicas).
+		if spec.GetScaleToZero() && env.GetEffectiveReplicas() == 0 {
+			if min := spec.GetReplicas().GetMin(); min > 0 {
+				env.EffectiveReplicas = min
+			} else {
+				env.EffectiveReplicas = 1
 			}
 		}
 		if err := s.apply(ctx, id.UserID, &clusterv1.Command{Mutation: &clusterv1.Command_PutEnvironment{PutEnvironment: &clusterv1.PutEnvironment{Environment: env}}}); err != nil {

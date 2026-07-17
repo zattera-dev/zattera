@@ -2512,7 +2512,7 @@ Cloudflare record in a mocked driver test; alerts fire to a webhook;
 PR preview environments lifecycle works against simulated webhooks; full CI
 matrix green.
 
-### T-69 — Idle tracking + scale to zero
+### T-69 — Idle tracking + scale to zero  ✅ **DONE**
 Phase 7 · Depends: T-61, T-42 · Size: M
 **Files:** `internal/daemon/scheduler/scaletozero.go`, tests
 **Steps:**

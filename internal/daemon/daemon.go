@@ -458,6 +458,10 @@ func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store
 	// CPU/memory/RPS against each env's Autoscale targets. Leader-gated internally.
 	go scheduler.NewAutoscaler(rs, live, clk, log).Run(ctx)
 
+	// Scale-to-zero (T-69): the leader cools an idle scale_to_zero env down to
+	// zero replicas after its idle_timeout; the activator (T-70) wakes it.
+	go scheduler.NewScaleToZero(rs, live, clk, log).Run(ctx)
+
 	// Scheduled volume snapshots (T-65): the leader fires SnapshotPolicy.schedule
 	// snapshots and enforces keep_last. Only when snapshots are available.
 	if snapDispatcher != nil {

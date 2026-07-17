@@ -265,6 +265,9 @@ message ApplyAppConfigRequest {
   GitHubConfig github = 4;
   // environment name → spec, from zattera.toml [env.*] sections
   map<string, ServiceSpec> environments = 5;
+  // environment name → scale-to-zero idle window (lives on Environment, not
+  // ServiceSpec). Absent = leave the env's current idle_timeout untouched.
+  map<string, google.protobuf.Duration> idle_timeouts = 6;
 }
 
 message SetEnvVarsRequest {

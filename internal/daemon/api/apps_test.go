@@ -5,11 +5,13 @@ import (
 	"crypto/tls"
 	"net"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	clusterv1 "github.com/zattera-dev/zattera/api/gen/zattera/cluster/v1"
 	zatterav1 "github.com/zattera-dev/zattera/api/gen/zattera/v1"
@@ -204,5 +206,48 @@ func TestAppInvalidName(t *testing.T) {
 	_, _ = pc.CreateProject(ctx, &zatterav1.CreateProjectRequest{Name: "demo"})
 	if _, err := ac.CreateApp(ctx, &zatterav1.CreateAppRequest{ProjectId: "demo", Name: "Bad_Name"}); status.Code(err) != codes.InvalidArgument {
 		t.Errorf("bad app name code = %v, want InvalidArgument", status.Code(err))
+	}
+}
+
+// TestApplyAppConfigScaleToZero covers the T-69 wiring: idle_timeout lands on the
+// Environment, a scale-to-zero env is seeded to run (effective=min), and
+// scale_to_zero + stateful is rejected.
+func TestApplyAppConfigScaleToZero(t *testing.T) {
+	rs := raftstore.NewTestStore(t)
+	st := rs.State()
+	st.PutApp(&zatterav1.App{Meta: &zatterav1.Meta{Id: "app1"}, Name: "web", ProjectId: "p1"})
+	srv := NewAppServer(st, rs, clock.NewFake(), nil)
+	ctx := withIdentity(context.Background(), Identity{UserID: "u1"})
+
+	// Valid scale-to-zero env with an idle window.
+	if _, err := srv.ApplyAppConfig(ctx, &zatterav1.ApplyAppConfigRequest{
+		ProjectId: "p1", AppId: "app1",
+		Environments: map[string]*zatterav1.ServiceSpec{
+			"production": {ScaleToZero: true, Replicas: &zatterav1.ReplicaRange{Min: 2, Max: 5}},
+		},
+		IdleTimeouts: map[string]*durationpb.Duration{"production": durationpb.New(20 * time.Minute)},
+	}); err != nil {
+		t.Fatalf("apply scale-to-zero: %v", err)
+	}
+	env, ok := st.EnvironmentByName("app1", "production")
+	if !ok {
+		t.Fatal("production env not created")
+	}
+	if env.GetIdleTimeout().AsDuration() != 20*time.Minute {
+		t.Fatalf("idle_timeout not applied: %v", env.GetIdleTimeout().AsDuration())
+	}
+	if env.GetEffectiveReplicas() != 2 {
+		t.Fatalf("scale-to-zero env not seeded to min: effective=%d", env.GetEffectiveReplicas())
+	}
+
+	// scale_to_zero + stateful is rejected.
+	_, err := srv.ApplyAppConfig(ctx, &zatterav1.ApplyAppConfigRequest{
+		ProjectId: "p1", AppId: "app1",
+		Environments: map[string]*zatterav1.ServiceSpec{
+			"staging": {ScaleToZero: true, Stateful: true},
+		},
+	})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("scale_to_zero+stateful code = %v, want InvalidArgument", status.Code(err))
 	}
 }

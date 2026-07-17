@@ -105,8 +105,8 @@ If you declare nothing and the app has an HTTP port, you get the HTTP `/healthz`
 | `command` | image default | Override the container command |
 | `stop_grace` | `10s` | Graceful-stop window before kill |
 | `stateful` | `false` | Stateful service: node-pinned [volumes](../data/volumes), exactly-one, stop-then-start deploys |
-| `idle_timeout` | — | [Scale-to-zero](../scaling/scale-to-zero) idle window *(WIP)* |
-| `scale_to_zero` / `max_concurrency` | — | Serverless mode *(WIP)* |
+| `scale_to_zero` / `idle_timeout` | — | Cool an idle env to 0 replicas after the window — [Scale-to-zero](../scaling/scale-to-zero) |
+| `max_concurrency` | — | Serverless concurrency mode *(WIP)* |
 | `[env.<name>.resources]` | — | `cpu_millis`, `memory_mb` reservations (used for placement) |
 | `[env.<name>.autoscale]` | — | [Autoscaling](../scaling/autoscaling) targets: `target_cpu_percent`, `target_memory_percent`, `target_rps_per_replica` |
 | `[env.<name>.placement]` | — | Node label constraints (string map) |

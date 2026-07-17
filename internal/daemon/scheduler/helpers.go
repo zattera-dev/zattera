@@ -15,9 +15,17 @@ import (
 // desiredReplicas is the target replica count for an env: the autoscaler's
 // effective count when set, else replicas.min. 0 when there is no active
 // release (nothing to run).
+//
+// For scale-to-zero envs (T-69) effective_replicas is authoritative — 0 means
+// deliberately cold, not "follow min" — so the scale-to-zero loop can drive the
+// count to zero and the activator (T-70) back up. ApplyAppConfig seeds a fresh
+// scale-to-zero env's effective count to min so 0 only ever comes from the loop.
 func desiredReplicas(env *zatterav1.Environment) int {
 	if env.GetActiveReleaseId() == "" {
 		return 0
+	}
+	if env.GetService().GetScaleToZero() {
+		return int(env.GetEffectiveReplicas())
 	}
 	if r := env.GetEffectiveReplicas(); r > 0 {
 		return int(r)
