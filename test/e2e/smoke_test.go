@@ -74,7 +74,9 @@ func TestSmoke(t *testing.T) {
 	h.pollBody(httpURL, host, "v2", 90*time.Second)
 
 	h.mustCLI("rollback", "--app", "hello", "--env", "production", "--project", "smoke")
-	h.pollBody(httpURL, host, "Hello from Zattera fixture", 30*time.Second)
+	// Dev shortens the blue-drain window, so a rollback may re-place the old
+	// release cold rather than instant-switch to a still-warm blue.
+	h.pollBody(httpURL, host, "Hello from Zattera fixture", 90*time.Second)
 
 	// Step 6: a one-shot job exits 0.
 	if out, err := h.cli(fixture, "jobs", "run", "hello", "--env", "production", "--project", "smoke", "--", "echo", "done"); err != nil {

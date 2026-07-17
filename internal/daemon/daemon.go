@@ -482,7 +482,11 @@ func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store
 
 	// Deployment orchestrator (T-26): the leader drives red/green deployments
 	// through their phases. Leader-gated internally.
-	go scheduler.NewOrchestrator(rs, clk, log).Run(ctx)
+	orch := scheduler.NewOrchestrator(rs, clk, log)
+	if cfg.Dev {
+		orch.SetDrainWindow(devDrainWindow) // fast local iteration; prod keeps 10m
+	}
+	go orch.Run(ctx)
 
 	// Release retention (T-38): the leader prunes old releases + their registry
 	// images and stale source tarballs. The registry sweeper is wired when this

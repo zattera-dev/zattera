@@ -5,6 +5,7 @@ import (
 	"io"
 	"path/filepath"
 	"regexp"
+	"time"
 
 	"github.com/zattera-dev/zattera/internal/config"
 )
@@ -22,6 +23,11 @@ const (
 	// devRegistryListen avoids :5000, which macOS ControlCenter (AirPlay) owns.
 	devRegistryListen  = ":5001"
 	prodRegistryListen = ":5000"
+	// devDrainWindow shortens the post-promotion blue-drain window for fast local
+	// iteration (production keeps the 10-minute default). A deployment reaches
+	// SUCCEEDED soon after promotion, so the scheduler and scale-to-zero loop
+	// (which defer to a running deployment) resume promptly.
+	devDrainWindow = 20 * time.Second
 )
 
 // applyDevDefaults fills unset dev-mode conveniences: a loopback app domain and
