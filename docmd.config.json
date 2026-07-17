@@ -35,7 +35,7 @@
         { "title": "Installation", "path": "/setup/installation/", "icon": "download" },
         { "title": "Configuration", "path": "/setup/configuration/", "icon": "file-cog" },
         { "title": "Nodes", "path": "/setup/nodes/", "icon": "server" },
-        { "title": "High availability · WIP", "path": "/setup/high-availability/", "icon": "shield" },
+        { "title": "High availability", "path": "/setup/high-availability/", "icon": "shield" },
         { "title": "Node autoprovisioning · WIP", "path": "/setup/node-autoprovisioning/", "icon": "cloud" }
       ]
     },

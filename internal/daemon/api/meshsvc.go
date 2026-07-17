@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"log/slog"
+	"net/netip"
 	"sort"
 	"sync"
 	"time"
@@ -125,11 +126,14 @@ func (s *MeshServer) callerNodeID(ctx context.Context, claimed string) (string, 
 	return claimed, nil
 }
 
-// buildPeerSet computes the WireGuard peers for one node (Phase A hub-and-spoke):
-//   - a worker gets ONLY the control nodes, each routing the whole mesh
-//     (allowed_ips = 10.90.0.0/16), hub_and_spoke=true, with a 25s keepalive
-//     when the worker itself is NAT'd (no public endpoint) so it keeps the hole
-//     to the hub open.
+// buildPeerSet computes the WireGuard peers for one node:
+//   - a worker routes the whole mesh (allowed_ips = 10.90.0.0/16) through ONE
+//     active control hub (see activeHubID) and holds a direct /32 to every other
+//     control node, so their raft/API IPs stay reachable and their tunnels stay
+//     warm for instant failover. When the active hub is marked DOWN, this
+//     recomputes and WatchPeers pushes the /16 onto the next live hub (T-55c). A
+//     NAT'd worker (no public endpoint) keeps a 25s keepalive to every hub so the
+//     standby holes stay open.
 //   - a control gets EVERY other mesh node with a /32 allowed IP. It never sets
 //     a keepalive and never dials a NAT'd worker (empty endpoint) — the hub
 //     waits for the worker to connect.
@@ -142,7 +146,7 @@ func (s *MeshServer) buildPeerSet(selfID string) *clusterv1.PeerSet {
 			break
 		}
 	}
-	ps := &clusterv1.PeerSet{Version: s.store.Version()}
+	ps := &clusterv1.PeerSet{Version: s.store.Version(), LeaderNodeId: leaderNodeID(s.raft)}
 	if self == nil {
 		return ps
 	}
@@ -150,6 +154,7 @@ func (s *MeshServer) buildPeerSet(selfID string) *clusterv1.PeerSet {
 	selfHasEndpoint := len(self.GetPublicEndpoints()) > 0
 	selfMeshsock := self.GetLabels()[MeshsockLabel] == "true"
 	ps.HubAndSpoke = !selfControl
+	hubID := activeHubID(nodes) // the control node a worker routes the /16 through
 
 	for _, n := range nodes {
 		if n.GetMeta().GetId() == selfID {
@@ -172,8 +177,15 @@ func (s *MeshServer) buildPeerSet(selfID string) *clusterv1.PeerSet {
 			// Control sees every node with a /32.
 			peer.AllowedIps = []string{n.GetMeshIp() + "/32"}
 		case isControl:
-			// Worker → control: the hub route for the whole mesh.
-			peer.AllowedIps = []string{meshCIDR}
+			// Worker → control. Exactly one control node — the active hub — carries
+			// the whole-mesh /16; the rest get a direct /32 (a warm standby route
+			// that also keeps their own IP reachable). WireGuard can only route a
+			// prefix to one peer, so this is what makes multi-control failover work.
+			if n.GetMeta().GetId() == hubID {
+				peer.AllowedIps = []string{meshCIDR}
+			} else {
+				peer.AllowedIps = []string{n.GetMeshIp() + "/32"}
+			}
 			if !selfHasEndpoint {
 				peer.PersistentKeepaliveSeconds = natKeepaliveSeconds
 			}
@@ -197,6 +209,53 @@ func (s *MeshServer) buildPeerSet(selfID string) *clusterv1.PeerSet {
 	}
 	sort.Slice(ps.Peers, func(i, j int) bool { return ps.Peers[i].GetNodeId() < ps.Peers[j].GetNodeId() })
 	return ps
+}
+
+// leaderNodeID returns the current raft leader's node id via the optional
+// LeaderAddr method (raftstore.Store implements it), or "" when unknown / not
+// exposed (unit tests pass a bare Applier or nil).
+func leaderNodeID(a Applier) string {
+	if lr, ok := a.(interface{ LeaderAddr() (string, string) }); ok {
+		_, id := lr.LeaderAddr()
+		return id
+	}
+	return ""
+}
+
+// activeHubID picks the control node a worker routes the whole mesh (/16)
+// through: the ALIVE, mesh-ready control node with the LOWEST mesh IP. Every
+// worker computes the same hub deterministically, and because it is health-
+// driven the choice climbs to the next live control node the moment the active
+// one is marked DOWN (gossip/heartbeat → SetNodeStatus → a WatchPeers re-push),
+// which is what makes multi-control hub failover work. Selecting by mesh IP
+// keeps the bootstrap node (10.90.0.1) the default hub — matching the historical
+// single-hub behaviour — with failover climbing to .2, .3, … Falls back to the
+// lowest mesh IP among all controls when none are ALIVE (a maybe-dead default
+// route beats none). Returns "" when no control node is mesh-ready.
+func activeHubID(nodes []*zatterav1.Node) string {
+	activeID, activeIP := "", netip.Addr{}
+	fallbackID, fallbackIP := "", netip.Addr{}
+	lower := func(a, b netip.Addr) bool { return !b.IsValid() || a.Compare(b) < 0 }
+	for _, n := range nodes {
+		if !hasControlRole(n.GetRoles()) || n.GetWireguardPublicKey() == "" || n.GetMeshIp() == "" {
+			continue
+		}
+		ip, err := netip.ParseAddr(n.GetMeshIp())
+		if err != nil {
+			continue
+		}
+		id := n.GetMeta().GetId()
+		if lower(ip, fallbackIP) {
+			fallbackID, fallbackIP = id, ip
+		}
+		if n.GetStatus() == zatterav1.NodeStatus_NODE_STATUS_ALIVE && lower(ip, activeIP) {
+			activeID, activeIP = id, ip
+		}
+	}
+	if activeID != "" {
+		return activeID
+	}
+	return fallbackID
 }
 
 // ReportObservedEndpoint records a node's own disco-observed reflexive endpoint.

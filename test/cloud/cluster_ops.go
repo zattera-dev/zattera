@@ -67,6 +67,25 @@ func (c *Cluster) JoinWorker(arch string) *Node {
 	return n
 }
 
+// JoinHubWorker brings up a worker that advertises no public endpoint, so its
+// cross-worker traffic has no direct path and must route through the active
+// control hub. Used to exercise multi-hub failover (T-55c).
+func (c *Cluster) JoinHubWorker(arch string) *Node {
+	c.T.Helper()
+	if c.control == nil {
+		c.T.Fatal("cloud: JoinHubWorker requires StartControl first")
+	}
+	token := c.workerJoinToken()
+	n := c.CreateNode(NodeSpec{Role: "worker", Arch: arch})
+	n.InstallDocker()
+	n.InstallBinary()
+	n.WriteHubWorkerConfig(c.control.PublicIPv4(), token)
+	n.StartService()
+	c.WaitNodeRegistered(n.Name())
+	c.T.Logf("cloud: hub-routed worker %s (%s) joined", n.Name(), arch)
+	return n
+}
+
 // JoinControl brings up an additional CONTROL node that joins the cluster's raft
 // quorum (T-55) and waits until it registers. Requires StartControl first. It
 // advertises its own public endpoint so the other control nodes peer with it

@@ -46,9 +46,12 @@ func (b *kernelBackend) apply(cfg deviceConfig) error {
 		wcfg.ListenPort = &p
 	}
 	for _, pc := range cfg.peers {
+		if pc.remove {
+			wcfg.Peers = append(wcfg.Peers, wgtypes.PeerConfig{PublicKey: pc.publicKey, Remove: true})
+			continue
+		}
 		peer := wgtypes.PeerConfig{
 			PublicKey:         pc.publicKey,
-			Remove:            pc.remove,
 			ReplaceAllowedIPs: true,
 		}
 		if pc.keepaliveSeconds > 0 {

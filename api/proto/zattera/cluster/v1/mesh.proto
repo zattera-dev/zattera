@@ -36,6 +36,10 @@ message PeerSet {
   // Phase A hub-and-spoke: if true, this node routes the whole mesh CIDR via
   // its control peers instead of per-peer /32 AllowedIPs.
   bool hub_and_spoke = 3;
+  // Node id of the current raft leader ("" during an election). A worker targets
+  // its AgentSync stream at the leader — livestate/heartbeats are leader-memory,
+  // so a stream landing on a follower would never mark the worker ALIVE (T-55c).
+  string leader_node_id = 4;
 }
 
 message Peer {

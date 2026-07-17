@@ -131,6 +131,14 @@ func New(opts Options) (*Server, error) {
 			MinTime:             10 * time.Second,
 			PermitWithoutStream: true,
 		}),
+		// Proactively ping idle clients so a dead worker stream (e.g. a node whose
+		// mesh tunnel dropped) is detected and torn down in ~20s instead of hanging
+		// for the OS TCP timeout — the mirror of the client keepalive that drives
+		// worker failover (T-55c).
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			Time:    15 * time.Second,
+			Timeout: 5 * time.Second,
+		}),
 	)
 	registerGRPC(grpcSrv, opts)
 

@@ -12,8 +12,10 @@ something runnable.
 > **T-55b** (daemon join-as-control), and **T-56** (gossip failure detection)
 > are done and **verified GREEN on a real 3-node Hetzner cluster**
 > (`test/cloud/ha_test.go`: quorum forms, leader-kill failover, dead node DOWN
-> in ~19s). Remaining T-55b polish (control mesh-hub for workers,
-> leadership-reactive device loops) is optional. **T-57/T-57c** (meshsock),
+> in ~19s). **T-55c** (multi-hub mesh + hub/control failover) completes HA: every
+> control node is a WireGuard hub, a worker's whole-mesh route fails over between
+> hubs, and workers roll their control-plane connection onto a surviving control
+> node (`test/cloud/multihub_test.go`). **T-57/T-57c** (meshsock),
 > **T-59/T-60** (ring TSDB metrics sampler + historical stats API/CLI),
 > **T-61** (CPU/mem/RPS autoscaler), **T-62** (node-pinned volumes + fencing
 > leases), **T-63** (stateful stop-then-start deploys), **T-64** (content-
@@ -1823,7 +1825,7 @@ workload impact (chaos suite); volumes snapshot/restore through MinIO;
 `zatterad restore` recreates a cluster from S3 on a fresh data dir; cron
 jobs fire.
 
-### T-55 — Multi-control-node HA  🟡 **PARTIAL** (raft HA core done; daemon bring-up → T-55b)
+### T-55 — Multi-control-node HA  ✅ **DONE** (raft HA core; daemon bring-up → T-55b; mesh HA → T-55c)
 Phase 6 · Depends: T-17, T-08 · Size: L
 **Done:** the raft HA core — `raftTLSStreamLayer` mTLS transport
 (`internal/daemon/raftstore/transport.go`), idempotent `AddVoter`/`RemoveServer`
@@ -1865,7 +1867,7 @@ mesh disabled): kill leader → new leader elected, API writes keep working
 via leader-forward; remove a follower cleanly.
 **Acceptance:** `go test -tags chaos ./test/chaos/ -run TestHA -timeout 15m`
 
-### T-55b — Daemon join-as-control bring-up  🟡 **PARTIAL** (wired; multi-hub mesh + cloud verify remain)
+### T-55b — Daemon join-as-control bring-up  ✅ **DONE** (mesh HA completed by T-55c)
 Phase 6 · Depends: T-55 · Size: L
 **Done:** the daemon path is wired end to end. `runControlPlane` is factored out
 of `Run` and shared by the bootstrap and joined paths. `runJoinedControl`
@@ -1878,25 +1880,117 @@ reachability BEFORE the idempotent `AddVoter`, so it never strands an
 unreachable voter. Unit test `TestEnrollControlVoter`; chaos `TestControlJoin`
 (dynamically-joined nodes replicate and one takes over when the bootstrap leader
 is killed).
-**Remaining (needs real multi-host / cloud harness):**
-1. Multi-hub mesh: a joined control node currently comes up as a mesh *spoke* at
-   its own `10.90.0.x` (raft + API work over it), but is not yet a hub workers
-   route through. `meshwiring.go`'s `controlMeshIP` still returns the single hub
-   `10.90.0.1` for the local node — generalize to per-control hub addressing.
-2. Leadership-reactive device loops: `runControlPlane` brings up the mesh hub
-   only at boot when `IsLeader` (`bringUpControlMesh`). A joined follower later
-   elected must bring the hub/ingress up on the `LeaderCh` transition.
-3. Registry self-credential for a joined control+worker node (its agent uses the
-   join-issued reg cred, not the leader-minted `selfRegAuth`).
-**Files:** `internal/daemon/daemon.go`, `internal/daemon/api/join.go` (done);
-`internal/daemon/meshwiring.go` (multi-hub — remaining); `test/cloud/`.
+**The three remaining items were completed by T-55c:** joined control nodes come
+up as real WireGuard hubs (not spokes), worker↔hub routing fails over between
+control nodes, and a joined control+worker uses its join-issued registry
+credential. See T-55c for the design and cloud verification.
 **Gotchas:** the root CA private key now lives on every control node (chosen
 handover design) — treat it as a cluster secret; a joined follower serves its
 own API cert from the handover CA; `registerLocalNode` is already done by the
 leader's Join handler (`runControlPlane` does not re-register).
-**Tests (remaining):** cloud harness — join a 2nd/3rd control node over a real
-mesh, kill the original leader, assert the cluster keeps serving and a new
-control node can still join; `zattera nodes rm` a control node.
+
+### T-55c — Multi-hub mesh + hub/control failover  ✅ **DONE**
+Phase 6 · Depends: T-55b, T-56 · Size: L
+Completes HA on the data plane: makes every control node a WireGuard hub and
+gives workers failover across hubs AND across control-plane endpoints, so the
+cluster keeps serving through the loss of any control node — not just raft.
+**Done:**
+1. **Every control node is a hub.** `bringUpControlHub` (`meshwiring.go`) replaces
+   `bringUpControlMeshDevice`/`startWorkerMesh` for control nodes — it brings the
+   device up on the node's OWN mesh IP (bootstrap `10.90.0.1`, joined `10.90.0.x`),
+   enables IP forwarding, and installs the initial control `/32` peers. Used by
+   both the bootstrap (`Run`) and joined (`runJoinedControl`) paths. `runJoinedControl`
+   no longer comes up as a spoke.
+2. **Health-driven hub selection + failover.** `activeHubID` (`meshsvc.go`) picks
+   the ALIVE control node with the lowest mesh IP as the hub a worker routes the
+   `/16` through; the other control nodes get a warm-standby `/32` with keepalive.
+   When the active hub is marked DOWN (gossip/heartbeat → `SetNodeStatus`), the
+   `KindNode` change re-pushes every worker a peer set with the `/16` re-pointed to
+   the next live hub. Mirrored in `buildInitialPeers`. Selecting by mesh IP keeps
+   `10.90.0.1` the default hub (backward-compatible) with failover climbing to `.2`.
+3. **Worker control-plane failover.** `controlEndpoints` (`controldialer.go`) is a
+   worker's view of reachable control API addresses (seeded at join, refreshed from
+   every peer set via `PeerSyncConfig.OnPeers`). Peer sync + route client `pick()`
+   (rotate) — they read replicated state, any control node serves them. The
+   AgentSync stream `pickLeader()`s: livestate/heartbeats are **leader-memory**
+   (`applyAnywhere` drops commands on a follower), so a stream landing on a
+   follower would never mark the worker ALIVE. The peer set now carries
+   `leader_node_id` (`buildPeerSet` → `leaderNodeID`), so the agent re-targets the
+   new leader after an election; leadership changes self-heal via the periodic
+   heartbeat-flush `KindNode` re-push. This fixed the first cloud run (workers
+   never reached ALIVE because they were rotating onto followers).
+4. **Leadership-reactive by construction.** The mesh hub + ingress now come up on
+   every control node at boot (not gated on `IsLeader`), so a follower elected
+   leader needs no hub bring-up on the `LeaderCh` transition; leader-only loops
+   already react via `leaderrunner`. The scale-to-zero activator forwards a wake to
+   the leader from any control node's ingress.
+5. **Registry self-credential** for a joined control+worker uses the join-issued
+   credential (a follower cannot mint its own); the bootstrap leader still mints.
+6. **Incremental peer reconcile** (`mesh/device.go` `ApplyPeers`). Cloud runs
+   exposed a pre-existing fragility: kernel WG `replace_peers=true` flushes and
+   re-handshakes EVERY peer on each push, so a worker joining a multi-control
+   cluster reset the control↔control raft tunnels and the leader stepped down
+   ("failed to contact quorum"). No prior test hit it (the webapp test has 1
+   control; `ha_test` has 0 workers). `ApplyPeers` now diffs against the
+   last-applied key set: `replace_peers=false`, update desired peers in place
+   (no session reset when endpoint/key are unchanged), and emit an explicit
+   `remove` only for peers that vanished. This also makes hub failover itself
+   churn-free (flipping a peer's `/16`↔`/32` is an in-place allowed-ips update).
+7. **Hub packet forwarding** (`meshwiring.go` `enableIPForward`). Cloud runs
+   exposed a second latent gap: the hub set `net.ipv4.ip_forward=1` but never
+   added FORWARD rules, and Docker (on every worker-capable node) defaults the
+   iptables FORWARD policy to DROP — so worker↔worker packets through the hub were
+   silently blackholed. The hub now inserts `FORWARD -i/-o <mesh-iface> ACCEPT` at
+   the top of the chain (idempotent). Never caught before because no test drove
+   worker↔worker over hub IP-forwarding.
+8. **gRPC keepalive on worker↔control streams** (`controldialer.go` +
+   `api/server.go`). Cloud runs exposed the last gap: when the join-control node
+   (leader + hub) was stopped, its WireGuard device tore down and the workers'
+   gRPC streams hung over the dead tunnel for the OS TCP timeout (minutes) — a
+   server-stream like peer sync receives but never sends, so it never noticed and
+   never reconnected; the workers went DOWN and the `/16` never re-pointed. Worker
+   control dials now use a 15s client keepalive (5s timeout, above the server's
+   10s `MinTime`), so a dead control node is detected in ~20s → reconnect →
+   failover. Added matching server keepalive to reap dead client streams.
+**Files:** `internal/daemon/meshwiring.go`, `internal/daemon/daemon.go`,
+`internal/daemon/api/server.go` (keepalive),
+`internal/daemon/controldialer.go`, `internal/daemon/api/meshsvc.go`,
+`internal/daemon/api/join.go`, `internal/daemon/mesh/peersync.go`,
+`internal/daemon/intdnswiring.go`, `internal/daemon/mesh/device.go`
+(incremental `ApplyPeers`), `internal/daemon/mesh/kernel_linux.go`,
+`api/proto/zattera/cluster/v1/mesh.proto` (`PeerSet.leader_node_id`),
+`test/cloud/multihub_test.go`.
+**Gotchas:** a worker dialing a standby control node needs its SNI to match that
+node's mesh-IP SAN — `controlEndpoints.pick` builds per-target creds. Standby hubs
+must keep a warm keepalive tunnel from NAT'd/hub-routed workers or failover isn't
+instant. Never give two control peers the `/16` — WireGuard routes a prefix to one
+peer only; exactly one active hub carries it.
+**Tests:** unit `TestActiveHubID`, `TestPeerSets` (active hub + failover),
+`TestWatchPeersHubFailover` (status change re-pushes the `/16`),
+`TestBuildPeerSetAdvertisesLeader`, `TestControlEndpoints*` (rotation + leader
+tracking). Chaos `TestHA`/`TestControlJoin` still green.
+**Acceptance (cloud):** `go test -tags cloud ./test/cloud/ -run TestMultiHubFailover`
+— 3 control hubs + 2 hub-routed workers; STOP the bootstrap (leader + active hub +
+join-control node at once); assert the quorum still serves writes, the node is
+marked DOWN, and worker↔worker traffic RECOVERS through a surviving hub.
+
+### T-55d — Follower control+worker agent → leader  ⬜ **OPEN**
+Phase 6 · Depends: T-55c · Size: M
+Surfaced during T-55c. A control node that also carries the worker role runs its
+own node agent over loopback (`localAgentDialer`) to its OWN API. On a FOLLOWER
+that API is not the leader, and `applyAnywhere` drops agent commands on a
+follower — so a follower control+worker's observed assignment state and resource
+samples never reach the LEADER's (leader-memory) livestate. Node *liveness* is
+fine (gossip keeps control nodes ALIVE), but the scheduler/orchestrator on the
+leader can't see what's actually running on a follower control+worker, so
+deploying workloads onto follower control nodes is not yet correct. Pure workers
+already target the leader (T-55c `controlEndpoints.pickLeader`); the equivalent
+is needed for a co-located control node's own agent — either dial the leader (a
+control node can resolve it via `LeaderAddr`) or land follower→leader command
+forwarding for AgentSync. Not exercised by any test yet (the cloud HA tests run
+no workloads on the control nodes). **Files:** `internal/daemon/daemon.go`
+(`localAgentDialer` / the control node's own agent wiring),
+`internal/daemon/api/agentsync.go` (`applyAnywhere`).
 
 ### T-56 — memberlist gossip failure detection  ✅ **DONE**
 Phase 6 · Depends: T-55, T-19 · Size: M

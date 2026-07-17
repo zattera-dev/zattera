@@ -164,7 +164,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 		Logger:    log,
 	}
 	if meshIP != "" {
-		dm, derr := bringUpControlMeshDevice(ctx, cfg, log)
+		dm, derr := bringUpControlHub(ctx, cfg, meshIP, nil, log)
 		if derr != nil {
 			return fmt.Errorf("daemon: control mesh device: %w", derr)
 		}
@@ -252,20 +252,21 @@ func Run(ctx context.Context, cfg config.Config) error {
 		}
 	}
 
-	return runControlPlane(ctx, cfg, rs, nodeID, meshIP, authority, sealer, keyring, controlMesh, log)
+	return runControlPlane(ctx, cfg, rs, nodeID, meshIP, authority, sealer, keyring, controlMesh, nil, log)
 }
 
 // runControlPlane wires and runs the full control-plane stack — API server,
-// scheduler, orchestrator, ingress, registry, node agent and (when it owns it)
-// the WireGuard mesh hub — and blocks until ctx is canceled or the API server
-// errors. It is shared by the bootstrap control node (Run) and a node that
-// joined with the control role (runJoinedControl). meshIP is this node's own
-// mesh address (gossip binds it; "" when the mesh is disabled).
-// controlMesh, when non-nil, is this node's already-up WireGuard hub device
-// (brought up before raft so it could bind the mesh IP); runControlPlane records
-// its identity in state and starts peer sync. A joined control node passes nil
-// because it already brought its mesh up as a spoke (see runJoinedControl).
-func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store, nodeID, meshIP string, authority *ca.CA, sealer secrets.Sealer, keyring *secrets.Keyring, controlMesh *mesh.DeviceManager, log *slog.Logger) error {
+// scheduler, orchestrator, ingress, registry, node agent and the WireGuard mesh
+// hub — and blocks until ctx is canceled or the API server errors. It is shared
+// by the bootstrap control node (Run) and a node that joined with the control
+// role (runJoinedControl). meshIP is this node's own mesh address (gossip binds
+// it; "" when the mesh is disabled). controlMesh, when non-nil, is this node's
+// already-up WireGuard hub device (brought up before raft so it could bind the
+// mesh IP); runControlPlane records its identity (leader only) and starts peer
+// sync. joinRegAuth, when non-nil, is the registry credential a joined control
+// node received at join — its co-located agent uses it to push/pull cluster
+// images instead of the leader-minted self credential (T-55c).
+func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store, nodeID, meshIP string, authority *ca.CA, sealer secrets.Sealer, keyring *secrets.Keyring, controlMesh *mesh.DeviceManager, joinRegAuth *crt.RegistryAuth, log *slog.Logger) error {
 	st := rs.State()
 
 	// Public API services (T-04 auth, T-05 projects+rbac, T-06 apps) with the
@@ -342,13 +343,30 @@ func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store
 	statsSink := func(s *proxy.Stats) { proxyStats.Store(s) }
 
 	// Scale-to-zero activator (T-70): the control-node ingress parks a request
-	// for a cold env and calls this to wake it. In-process apply — correct on the
-	// leader (always in single-control). NOTE: on a follower control node this
-	// returns ErrNotLeader, so wake-on-request currently needs the request to
-	// reach the leader's ingress (tracked with the T-55b multi-control HA work).
+	// for a cold env and calls this to wake it. On the leader it applies
+	// in-process; on a FOLLOWER control node it forwards the wake to the leader's
+	// ActivatorService, so wake-on-request works from any control node's ingress —
+	// not just the leader's (T-55c). The forward presents this node's identity and
+	// targets the leader's mesh IP (a SAN on the leader's API cert).
 	activatorSrv := api.NewActivatorServer(st, rs, clk, log)
+	leaderResolve := leaderAPIResolver(rs, st, cfg)
 	activateFn := func(ctx context.Context, envID string) error {
-		_, err := activatorSrv.Activate(ctx, &clusterv1.ActivateRequest{EnvironmentId: envID, NodeId: nodeID})
+		req := &clusterv1.ActivateRequest{EnvironmentId: envID, NodeId: nodeID}
+		if rs.IsLeader() {
+			_, err := activatorSrv.Activate(ctx, req)
+			return err
+		}
+		addr, err := leaderResolve()
+		if err != nil || addr == "" {
+			return fmt.Errorf("activate %s: no leader available: %w", envID, err)
+		}
+		host, _, _ := net.SplitHostPort(addr)
+		conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(credentials.NewTLS(nodeClientTLS(authority, nodeID, host))))
+		if err != nil {
+			return fmt.Errorf("activate %s: dial leader: %w", envID, err)
+		}
+		defer func() { _ = conn.Close() }()
+		_, err = clusterv1.NewActivatorServiceClient(conn).Activate(ctx, req)
 		return err
 	}
 	switch {
@@ -525,12 +543,14 @@ func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store
 			LocalLoad:     cfg.Dev,
 		}, log).Run(ctx)
 
-	// Mesh (T-19): the hub device is already up (brought up before raft so it
-	// could bind the mesh IP). Record its identity in state and start peer sync
-	// now that raft + the API are up. The device is owned/torn down by the caller.
-	// A joined control node passes controlMesh=nil — it set up its own spoke mesh.
-	if controlMesh != nil && rs.IsLeader() {
-		registerControlMesh(ctx, cfg, rs, controlMesh, authority, nodeID, log)
+	// Mesh (T-19/T-55c): the hub device is already up (brought up before raft so
+	// it could bind the mesh IP). Record its identity (leader only — a joined node
+	// was recorded at join) and start peer sync now that raft + the API are up.
+	// Every control node runs this — bootstrap and joined alike — so each is a hub
+	// a worker can fail its whole-mesh route over to. The device is owned/torn
+	// down by the caller.
+	if controlMesh != nil {
+		startControlMesh(ctx, cfg, rs, controlMesh, authority, nodeID, meshIP, log)
 	}
 
 	// DERP-lite relay (T-58): every mesh-enabled control node runs the TCP relay
@@ -571,10 +591,18 @@ func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store
 		// Registry credential for the co-located node: in production the
 		// embedded registry requires auth, but only joining workers are minted
 		// one (T-17) — without this, the control node's builder cannot push and
-		// its executor cannot pull cluster-built images. Mint a fresh credential
-		// each boot under the same registry/creds/<id> key the join flow uses.
+		// its executor cannot pull cluster-built images.
+		//   - A joined control node uses the credential it received at join
+		//     (joinRegAuth): it is a follower and cannot Apply, and its cred is
+		//     already stored under registry/creds/<id> by the leader's Join
+		//     handler (T-55c).
+		//   - The bootstrap leader mints a fresh credential each boot under the
+		//     same registry/creds/<id> key the join flow uses.
 		var selfRegAuth *crt.RegistryAuth
-		if !cfg.Dev && rs.IsLeader() {
+		switch {
+		case joinRegAuth != nil:
+			selfRegAuth = joinRegAuth
+		case !cfg.Dev && rs.IsLeader():
 			if pw, rerr := randomHex(24); rerr != nil {
 				log.Warn("registry self-credential: generate", "err", rerr)
 			} else if aerr := apply(ctx, rs, &clusterv1.Command{Mutation: &clusterv1.Command_PutKv{PutKv: &clusterv1.PutKV{
@@ -823,14 +851,19 @@ func runJoinedControl(ctx context.Context, cfg config.Config, jr *joinResult, lo
 		return fmt.Errorf("daemon: control join without a raft handover (control HA requires the mesh)")
 	}
 
-	// Bring the mesh up first (spoke to the existing hub) so this node's mesh IP
-	// — the raft bind address — is a real local interface before raft binds it.
+	// Bring the mesh up first as a HUB on this node's own mesh IP (T-55c) so the
+	// raft bind address is a real local interface before raft binds it, IP
+	// forwarding is on, and the initial control /32 peers from the join response
+	// let the raft mTLS transport reach the quorum. runControlPlane records its
+	// identity + starts peer sync once raft + the API are up.
+	var controlMesh *mesh.DeviceManager
 	if jr.MeshEnabled {
-		meshMgr, err := startWorkerMesh(ctx, cfg, jr, log)
+		dm, err := bringUpControlHub(ctx, cfg, jr.MeshIP, jr.initialPeers, log)
 		if err != nil {
 			return fmt.Errorf("daemon: joined control mesh: %w", err)
 		}
-		defer func() { _ = meshMgr.Down(context.Background()) }()
+		controlMesh = dm
+		defer func() { _ = controlMesh.Down(context.Background()) }()
 	}
 
 	// Install the handed-over cluster CA (cert + private key) so this node signs
@@ -883,7 +916,14 @@ func runJoinedControl(ctx context.Context, cfg config.Config, jr *joinResult, lo
 	}
 	log.Info("joined control plane", "node", jr.NodeID)
 
-	return runControlPlane(ctx, cfg, rs, jr.NodeID, jr.MeshIP, authority, sealer, keyring, nil, log)
+	// A joined control node that is also a worker uses the registry credential it
+	// received at join (it is a follower and cannot mint its own).
+	var joinRegAuth *crt.RegistryAuth
+	if jr.RegistryUser != "" {
+		joinRegAuth = &crt.RegistryAuth{Username: jr.RegistryUser, Password: jr.RegistryPass, ServerAddress: jr.RegistryAddr}
+	}
+
+	return runControlPlane(ctx, cfg, rs, jr.NodeID, jr.MeshIP, authority, sealer, keyring, controlMesh, joinRegAuth, log)
 }
 
 // raftPortOf returns the raft transport port from config (default 7480).
@@ -969,20 +1009,26 @@ func nodeHasControlRole(n *zatterav1.Node) bool {
 // It runs no local raft or control API. Mesh transport (T-18..20) is wired in
 // later; until then the control address must be directly reachable.
 func runWorker(ctx context.Context, cfg config.Config, jr *joinResult, log *slog.Logger) error {
+	// Control-plane failover set (T-55c): the agent, peer sync and route client
+	// all reconnect through this, so losing the join-control node (also the active
+	// hub) rolls the worker onto a surviving control node instead of retrying one
+	// dead address. Seeded from the join response; refreshed by peer sync.
+	ce, err := newControlEndpoints(jr)
+	if err != nil {
+		return err
+	}
+
 	// Bring the worker's WireGuard device up first (when the cluster uses a
 	// mesh) so the control plane's mesh IP is routable for the agent stream.
 	if jr.MeshEnabled {
-		meshMgr, err := startWorkerMesh(ctx, cfg, jr, log)
+		meshMgr, err := startWorkerMesh(ctx, cfg, jr, ce, log)
 		if err != nil {
 			return err
 		}
 		defer func() { _ = meshMgr.Down(context.Background()) }()
 	}
 
-	dial, err := workerAgentDialer(jr)
-	if err != nil {
-		return err
-	}
+	dial := workerAgentDialer(ce)
 
 	var rt crt.ContainerRuntime
 	if dk, err := crt.NewDocker(); err != nil {
@@ -1024,26 +1070,24 @@ func runWorker(ctx context.Context, cfg config.Config, jr *joinResult, log *slog
 	// Internal service mesh: subscribe to route snapshots from control, then run
 	// the VIP proxy + internal DNS so containers on this worker can reach
 	// <svc>.internal (F26). Best-effort — the executor still works without it.
+	// The route stream fails over across control nodes via ce (T-55c).
 	if !cfg.Dev && rt != nil {
-		if creds, cerr := workerTLSCreds(jr); cerr != nil {
-			log.Warn("intdns: route credentials", "err", cerr)
-		} else {
-			rc := proxy.NewRouteClient(
-				grpcRouteDialer{addr: jr.ControlGRPCAddr, nodeID: jr.NodeID, creds: creds},
-				jr.NodeID, filepath.Join(cfg.DataDir, "proxy", "routes.pb"), log)
-			go rc.Run(ctx)
-			startInternalMesh(ctx, rc, na.Executor(), log)
-		}
+		rc := proxy.NewRouteClient(
+			grpcRouteDialer{ce: ce, nodeID: jr.NodeID},
+			jr.NodeID, filepath.Join(cfg.DataDir, "proxy", "routes.pb"), log)
+		go rc.Run(ctx)
+		startInternalMesh(ctx, rc, na.Executor(), log)
 	}
 
 	log.Info("worker started", "node", jr.NodeID, "control", jr.ControlGRPCAddr)
 	return na.Run(ctx)
 }
 
-// workerTLSCreds builds the node-mTLS transport credentials a worker uses to
-// dial the control plane: the join-issued node cert/key, trusting the cluster CA
-// from the join response, with the control host as SNI.
-func workerTLSCreds(jr *joinResult) (credentials.TransportCredentials, error) {
+// workerControlCreds builds node-mTLS transport credentials a worker uses to
+// dial a specific control host (serverName must match a SAN on that node's API
+// cert — its own mesh IP). Used by the meshsock datapath, which pins to a single
+// control relay; the agent/peersync/route paths fail over via controlEndpoints.
+func workerControlCreds(jr *joinResult, serverName string) (credentials.TransportCredentials, error) {
 	cert, err := tls.X509KeyPair(jr.certPEM, jr.keyPEM)
 	if err != nil {
 		return nil, fmt.Errorf("daemon: load node cert: %w", err)
@@ -1052,32 +1096,30 @@ func workerTLSCreds(jr *joinResult) (credentials.TransportCredentials, error) {
 	if !pool.AppendCertsFromPEM(jr.caPEM) {
 		return nil, fmt.Errorf("daemon: parse cluster CA")
 	}
-	host, _, err := net.SplitHostPort(jr.ControlGRPCAddr)
-	if err != nil {
-		host = jr.ControlGRPCAddr
-	}
 	return credentials.NewTLS(&tls.Config{
 		MinVersion:   tls.VersionTLS12,
 		Certificates: []tls.Certificate{cert},
 		RootCAs:      pool,
-		ServerName:   host,
+		ServerName:   serverName,
 	}), nil
 }
 
-// workerAgentDialer dials the control plane's AgentSync over mTLS with the
-// node's signed identity, trusting the cluster CA from the join response.
-func workerAgentDialer(jr *joinResult) (func(context.Context) (*agent.Conn, error), error) {
-	creds, err := workerTLSCreds(jr)
-	if err != nil {
-		return nil, err
-	}
+// workerAgentDialer dials the LEADER's AgentSync over mTLS with the node's signed
+// identity. livestate/heartbeats are leader-memory, so the agent must reach the
+// leader; on an election the refreshed leader is used on the next reconnect, and
+// with no leader known yet it rotates until one answers (T-55c).
+func workerAgentDialer(ce *controlEndpoints) func(context.Context) (*agent.Conn, error) {
 	return func(context.Context) (*agent.Conn, error) {
-		conn, err := grpc.NewClient(jr.ControlGRPCAddr, grpc.WithTransportCredentials(creds))
+		addr, creds := ce.pickLeader()
+		if addr == "" {
+			return nil, fmt.Errorf("daemon: no control endpoint available")
+		}
+		conn, err := grpc.NewClient(addr, controlDialOpts(creds)...)
 		if err != nil {
 			return nil, err
 		}
 		return &agent.Conn{ClientConnInterface: conn, Close: conn.Close}, nil
-	}, nil
+	}
 }
 
 // openMetricsStore opens this node's ring TSDB (T-59) under the data dir. The

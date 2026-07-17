@@ -2,11 +2,11 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
 
 	clusterv1 "github.com/zattera-dev/zattera/api/gen/zattera/cluster/v1"
 	"github.com/zattera-dev/zattera/internal/daemon/agent"
@@ -55,15 +55,19 @@ func intdnsScopes(exec *agent.Executor) []intdns.NetworkScope {
 
 // grpcRouteDialer opens a WatchRoutes stream to the control plane over node mTLS.
 // It is the RouteSource transport for worker nodes; control nodes read routes
-// in-process from the RouteBuilder.
+// in-process from the RouteBuilder. It picks the next control endpoint on every
+// (re)connect so the route stream fails over when a control node dies (T-55c).
 type grpcRouteDialer struct {
-	addr   string
+	ce     *controlEndpoints
 	nodeID string
-	creds  credentials.TransportCredentials
 }
 
 func (d grpcRouteDialer) WatchRoutes(ctx context.Context, haveVersion uint64) (proxy.RouteStream, error) {
-	conn, err := grpc.NewClient(d.addr, grpc.WithTransportCredentials(d.creds))
+	addr, creds := d.ce.pick()
+	if addr == "" {
+		return nil, fmt.Errorf("daemon: no control endpoint available")
+	}
+	conn, err := grpc.NewClient(addr, controlDialOpts(creds)...)
 	if err != nil {
 		return nil, err
 	}

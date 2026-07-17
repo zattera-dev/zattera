@@ -27,6 +27,9 @@ type PeerSyncConfig struct {
 	// Dial opens a connection to a control node's MeshService. Called on every
 	// (re)connect; the returned closer is invoked when the stream ends.
 	Dial func(ctx context.Context) (grpc.ClientConnInterface, func() error, error)
+	// OnPeers, when set, is called with every PeerSet received (before it is
+	// applied). A worker uses it to keep its control-node failover set current.
+	OnPeers func(*clusterv1.PeerSet)
 }
 
 // RunPeerSync keeps a WatchPeers stream open and applies every pushed PeerSet to
@@ -88,6 +91,9 @@ func watchOnce(ctx context.Context, cfg PeerSyncConfig, log *slog.Logger) error 
 				return nil
 			}
 			return err
+		}
+		if cfg.OnPeers != nil {
+			cfg.OnPeers(ps)
 		}
 		if err := cfg.Manager.ApplyPeers(ctx, ps); err != nil {
 			log.Warn("peersync apply failed", "node", cfg.NodeID, "err", err)

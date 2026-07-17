@@ -339,20 +339,27 @@ disabled = true
 }
 
 func (n *Node) WriteWorkerConfig(controlIP, token string) {
-	n.writeWorkerConfig(controlIP, token, "")
+	n.writeWorkerConfig(controlIP, token, "", true)
 }
 
 // WriteMeshsockWorkerConfig writes a worker config on the meshsock datapath
 // (UDP hole punching + relay) — used for NAT'd worker↔worker tests.
 func (n *Node) WriteMeshsockWorkerConfig(controlIP, token string) {
-	n.writeWorkerConfig(controlIP, token, "meshsock")
+	n.writeWorkerConfig(controlIP, token, "meshsock", true)
 }
 
-func (n *Node) writeWorkerConfig(controlIP, token, mode string) {
-	// Mesh endpoint: a NAT node has no public IPv4 — advertise nothing and let
-	// disco/hole-punching (or the relay) handle it.
+// WriteHubWorkerConfig writes a worker config that advertises NO public endpoint,
+// so it has no direct worker↔worker path and its cross-worker traffic must route
+// through the active control hub. Used to exercise multi-hub failover (T-55c).
+func (n *Node) WriteHubWorkerConfig(controlIP, token string) {
+	n.writeWorkerConfig(controlIP, token, "", false)
+}
+
+func (n *Node) writeWorkerConfig(controlIP, token, mode string, advertiseEndpoint bool) {
+	// Mesh endpoint: a NAT node (or a deliberately hub-routed one) advertises
+	// nothing and lets the hub route its traffic.
 	meshEndpoint := ""
-	if n.machine.PublicIPv4 != "" {
+	if advertiseEndpoint && n.machine.PublicIPv4 != "" {
 		meshEndpoint = fmt.Sprintf("\npublic_endpoints = [\"%s:51820\"]", n.machine.PublicIPv4)
 	}
 	modeLine := ""

@@ -3,12 +3,12 @@ package daemon
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/netip"
 	"os"
+	"os/exec"
 	"path/filepath"
 
 	"google.golang.org/grpc"
@@ -48,16 +48,22 @@ func meshListenPort(cfg config.Config) uint16 {
 
 func wgKeyPath(dataDir string) string { return filepath.Join(dataDir, "wg.key") }
 
-// bringUpControlMeshDevice brings the control hub's WireGuard device up on its
-// mesh IP and enables IP forwarding. It writes NO cluster state, so it is safe
-// to call before raft is up — the raft mTLS transport and the gossip detector
-// both bind this node's mesh IP, so the device must exist first. Returns the
-// manager so the caller can tear it down and later register/peer-sync it.
-func bringUpControlMeshDevice(ctx context.Context, cfg config.Config, log *slog.Logger) (*mesh.DeviceManager, error) {
-	ip := controlMeshIP(cfg)
-	addr, err := netip.ParseAddr(ip)
+// bringUpControlHub brings a control node's WireGuard device up on meshIP as a
+// routing hub and enables IP forwarding, so workers can route worker↔worker
+// traffic through it. Every control node — the bootstrap node (meshIP =
+// 10.90.0.1) AND every joined control node (its own 10.90.0.x) — is a hub, which
+// is what lets a worker's whole-mesh route fail over from one control node to
+// another (T-55c). initialPeers, when non-nil, is installed immediately: a
+// joined control node receives the existing control /32 peers in its join
+// response so its raft mTLS transport can reach the quorum before peer sync
+// takes over. It writes NO cluster state, so it is safe to call before raft is
+// up — the raft transport and the gossip detector both bind meshIP, so the
+// device must exist first. Returns the manager so the caller can register and
+// tear it down.
+func bringUpControlHub(ctx context.Context, cfg config.Config, meshIP string, initialPeers *clusterv1.PeerSet, log *slog.Logger) (*mesh.DeviceManager, error) {
+	addr, err := netip.ParseAddr(meshIP)
 	if err != nil {
-		return nil, fmt.Errorf("daemon: control mesh ip: %w", err)
+		return nil, fmt.Errorf("daemon: control mesh ip %q: %w", meshIP, err)
 	}
 	dm := mesh.NewDeviceManager(log)
 	if err := dm.Up(ctx, mesh.NodeConfig{
@@ -68,23 +74,29 @@ func bringUpControlMeshDevice(ctx context.Context, cfg config.Config, log *slog.
 	}); err != nil {
 		return nil, err
 	}
-	enableIPForward(log)
-	log.Info("control mesh device up", "mesh_ip", ip)
+	enableIPForward(cfg, log)
+	if initialPeers != nil {
+		if err := dm.ApplyPeers(ctx, initialPeers); err != nil {
+			log.Warn("mesh: applying initial control peers failed", "err", err)
+		}
+	}
+	log.Info("control mesh hub up", "mesh_ip", meshIP)
 	return dm, nil
 }
 
-// registerControlMesh records the hub's mesh identity (IP + WG public key) in
-// cluster state and starts peer sync (dialing its own MeshService over
-// loopback). It requires raft leadership and the local API, and dm must already
-// be up (see bringUpControlMeshDevice).
-func registerControlMesh(ctx context.Context, cfg config.Config, rs *raftstore.Store, dm *mesh.DeviceManager, authority *ca.CA, nodeID string, log *slog.Logger) {
-	pub, err := dm.PublicKey()
-	if err != nil {
-		log.Warn("mesh: control node public key", "err", err)
-		return
-	}
-	if err := updateNodeMesh(ctx, rs, nodeID, controlMeshIP(cfg), pub, cfg.Mesh.PublicEndpoints); err != nil {
-		log.Warn("mesh: could not record control node mesh identity", "err", err)
+// startControlMesh finishes a control hub's mesh wiring once raft + the local API
+// are up: the leader records its own mesh identity (IP + WG public key + public
+// endpoints) — a joined control node skips this because the Join handler already
+// recorded its identity from the join request — and every control node starts
+// peer sync (dialing its own MeshService over loopback) so its WireGuard peer set
+// tracks cluster state. dm must already be up (see bringUpControlHub).
+func startControlMesh(ctx context.Context, cfg config.Config, rs *raftstore.Store, dm *mesh.DeviceManager, authority *ca.CA, nodeID, meshIP string, log *slog.Logger) {
+	if rs.IsLeader() {
+		if pub, err := dm.PublicKey(); err != nil {
+			log.Warn("mesh: control node public key", "err", err)
+		} else if err := updateNodeMesh(ctx, rs, nodeID, meshIP, pub, cfg.Mesh.PublicEndpoints); err != nil {
+			log.Warn("mesh: could not record control node mesh identity", "err", err)
+		}
 	}
 	go func() {
 		err := mesh.RunPeerSync(ctx, mesh.PeerSyncConfig{
@@ -97,7 +109,7 @@ func registerControlMesh(ctx context.Context, cfg config.Config, rs *raftstore.S
 			log.Warn("control peersync stopped", "err", err)
 		}
 	}()
-	log.Info("control mesh registered", "mesh_ip", controlMeshIP(cfg))
+	log.Info("control mesh registered", "mesh_ip", meshIP)
 }
 
 // updateNodeMesh records the node's mesh IP + WG public key so peers can reach
@@ -121,19 +133,46 @@ func updateNodeMesh(ctx context.Context, rs *raftstore.Store, nodeID, meshIP, pu
 	})
 }
 
-// enableIPForward turns on IPv4 forwarding so a control node can route
-// worker↔worker traffic through the hub. The installer is responsible for the
-// matching iptables FORWARD ACCEPT rules for zt0 (documented, not done here).
-func enableIPForward(log *slog.Logger) {
+// enableIPForward turns on IPv4 forwarding AND installs the iptables FORWARD
+// ACCEPT rules for the mesh interface, so a control node can actually route
+// worker↔worker traffic through the hub. The sysctl alone is not enough: Docker
+// (present on every worker-capable node) sets the FORWARD chain's default policy
+// to DROP, which silently blackholes forwarded mesh packets. We add explicit
+// ACCEPT rules for traffic entering or leaving the mesh interface (idempotent).
+// Best-effort + Linux-only — non-Linux / unprivileged just logs at debug.
+func enableIPForward(cfg config.Config, log *slog.Logger) {
 	if err := os.WriteFile("/proc/sys/net/ipv4/ip_forward", []byte("1\n"), 0o644); err != nil {
 		log.Debug("mesh: could not enable ip_forward (non-linux or unprivileged)", "err", err)
 	}
+	iface := cfg.Mesh.Interface
+	if iface == "" {
+		iface = defaultMeshInterface
+	}
+	for _, dir := range []string{"-i", "-o"} {
+		// -C (check) first so we don't stack duplicate rules across restarts.
+		check := exec.Command("iptables", "-C", "FORWARD", dir, iface, "-j", "ACCEPT")
+		if check.Run() == nil {
+			continue
+		}
+		// Insert at the top so mesh traffic is accepted BEFORE Docker's default
+		// FORWARD DROP policy (Docker owns this chain).
+		add := exec.Command("iptables", "-I", "FORWARD", "1", dir, iface, "-j", "ACCEPT")
+		if out, err := add.CombinedOutput(); err != nil {
+			log.Debug("mesh: could not add FORWARD ACCEPT rule (non-linux or unprivileged)",
+				"dir", dir, "iface", iface, "err", err, "out", string(out))
+		}
+	}
 }
+
+// defaultMeshInterface is the WireGuard interface name when none is configured
+// (matches mesh.defaultInterfaceName on Linux).
+const defaultMeshInterface = "zt0"
 
 // startWorkerMesh brings a joined worker's device up, installs the initial hub
 // peers so the control plane becomes reachable, and keeps peers in sync over
-// the mesh.
-func startWorkerMesh(ctx context.Context, cfg config.Config, jr *joinResult, log *slog.Logger) (*mesh.DeviceManager, error) {
+// the mesh. Every peer set it receives refreshes ce so the worker's control
+// failover set tracks the current control nodes (T-55c).
+func startWorkerMesh(ctx context.Context, cfg config.Config, jr *joinResult, ce *controlEndpoints, log *slog.Logger) (*mesh.DeviceManager, error) {
 	addr, err := netip.ParseAddr(jr.MeshIP)
 	if err != nil {
 		return nil, fmt.Errorf("daemon: worker mesh ip %q: %w", jr.MeshIP, err)
@@ -168,7 +207,8 @@ func startWorkerMesh(ctx context.Context, cfg config.Config, jr *joinResult, log
 			NodeID:  jr.NodeID,
 			Manager: dm,
 			Logger:  log,
-			Dial:    meshServiceDialer(jr),
+			Dial:    meshServiceDialer(ce),
+			OnPeers: ce.updateFromPeers,
 		})
 		if err != nil && ctx.Err() == nil {
 			log.Warn("worker peersync stopped", "err", err)
@@ -196,29 +236,16 @@ func loopbackMeshDialer(authority *ca.CA, nodeID, apiListen string) func(context
 	}
 }
 
-// meshServiceDialer dials the control plane's MeshService over the mesh using
-// the worker's signed node identity.
-func meshServiceDialer(jr *joinResult) func(context.Context) (grpc.ClientConnInterface, func() error, error) {
-	host, _, err := net.SplitHostPort(jr.ControlGRPCAddr)
-	if err != nil {
-		host = jr.ControlGRPCAddr
-	}
+// meshServiceDialer dials a control plane's MeshService over the mesh using the
+// worker's signed node identity, picking the next control endpoint on every
+// (re)connect so peer sync fails over when a control node dies (T-55c).
+func meshServiceDialer(ce *controlEndpoints) func(context.Context) (grpc.ClientConnInterface, func() error, error) {
 	return func(context.Context) (grpc.ClientConnInterface, func() error, error) {
-		cert, err := tls.X509KeyPair(jr.certPEM, jr.keyPEM)
-		if err != nil {
-			return nil, nil, err
+		addr, creds := ce.pick()
+		if addr == "" {
+			return nil, nil, fmt.Errorf("daemon: no control endpoint available")
 		}
-		pool := x509.NewCertPool()
-		if !pool.AppendCertsFromPEM(jr.caPEM) {
-			return nil, nil, fmt.Errorf("daemon: parse cluster CA")
-		}
-		creds := credentials.NewTLS(&tls.Config{
-			MinVersion:   tls.VersionTLS12,
-			Certificates: []tls.Certificate{cert},
-			RootCAs:      pool,
-			ServerName:   host,
-		})
-		cc, err := grpc.NewClient(jr.ControlGRPCAddr, grpc.WithTransportCredentials(creds))
+		cc, err := grpc.NewClient(addr, controlDialOpts(creds)...)
 		if err != nil {
 			return nil, nil, err
 		}

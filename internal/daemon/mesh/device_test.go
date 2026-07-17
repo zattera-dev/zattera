@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
@@ -140,10 +141,10 @@ func TestApplyPeersRendersUAPI(t *testing.T) {
 	if len(fake.configs) != 1 {
 		t.Fatalf("expected 1 IpcSet call, got %d", len(fake.configs))
 	}
-	// ApplyPeers deliberately omits listen_port (set once at device-up) so a
-	// custom meshsock bind is not rebound/churned on every peer update.
+	// ApplyPeers reconciles incrementally: NO replace_peers (that would flush and
+	// reset every peer's session, tearing down the control↔control raft tunnels on
+	// unrelated churn) and NO listen_port (set once at device-up).
 	want := "private_key=0100000000000000000000000000000000000000000000000000000000000000\n" +
-		"replace_peers=true\n" +
 		"public_key=0200000000000000000000000000000000000000000000000000000000000000\n" +
 		"endpoint=1.2.3.4:51820\n" +
 		"persistent_keepalive_interval=25\n" +
@@ -156,6 +157,35 @@ func TestApplyPeersRendersUAPI(t *testing.T) {
 	// Status reflects the hub path for the control peer.
 	if dm.Status().PeerPaths["c1"] != "direct" {
 		t.Fatalf("peer path = %q", dm.Status().PeerPaths["c1"])
+	}
+
+	// A second apply that adds a worker peer must NOT re-flush the control peer
+	// (no replace_peers, no c1 remove) — only the new peer is added.
+	peers2 := &clusterv1.PeerSet{Peers: []*clusterv1.Peer{
+		peers.Peers[0],
+		{NodeId: "w1", WireguardPublicKey: key(0x03).String(), MeshIp: "10.90.1.1", AllowedIps: []string{"10.90.1.1/32"}},
+	}}
+	if err := dm.ApplyPeers(context.Background(), peers2); err != nil {
+		t.Fatalf("ApplyPeers 2: %v", err)
+	}
+	got2 := fake.configs[1]
+	if strings.Contains(got2, "replace_peers=true") {
+		t.Fatalf("incremental apply must not replace_peers:\n%s", got2)
+	}
+	if strings.Contains(got2, "remove=true") {
+		t.Fatalf("adding a peer must not remove the unchanged control peer:\n%s", got2)
+	}
+	if !strings.Contains(got2, "public_key="+hexKey(key(0x03))) {
+		t.Fatalf("new worker peer not applied:\n%s", got2)
+	}
+
+	// A third apply that drops the worker must emit an explicit remove for it.
+	if err := dm.ApplyPeers(context.Background(), peers); err != nil {
+		t.Fatalf("ApplyPeers 3: %v", err)
+	}
+	got3 := fake.configs[2]
+	if !strings.Contains(got3, "public_key="+hexKey(key(0x03))+"\nremove=true\n") {
+		t.Fatalf("dropped worker peer must be removed explicitly:\n%s", got3)
 	}
 
 	// ApplyPeers before Up is an error.

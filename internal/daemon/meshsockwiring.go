@@ -66,13 +66,13 @@ func meshsockSetup(ctx context.Context, cfg config.Config, jr *joinResult, dm *m
 	if err != nil {
 		return nil, err
 	}
-	creds, err := workerTLSCreds(jr)
-	if err != nil {
-		return nil, err
-	}
 	controlHost, _, err := net.SplitHostPort(jr.ControlGRPCAddr)
 	if err != nil {
 		controlHost = jr.ControlGRPCAddr
+	}
+	creds, err := workerControlCreds(jr, controlHost)
+	if err != nil {
+		return nil, err
 	}
 
 	// MeshService client for RequestPunch + PunchStream.

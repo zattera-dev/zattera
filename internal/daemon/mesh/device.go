@@ -61,6 +61,12 @@ type DeviceManager struct {
 	backend   deviceBackend
 	up        bool
 	peerPaths map[string]string
+	// appliedKeys is the set of peer public keys currently programmed on the
+	// device (hex → key). ApplyPeers reconciles incrementally against it so a
+	// peer-set change (e.g. a worker joining) does NOT reset the sessions of
+	// unchanged peers — critical for the control↔control raft tunnels, which a
+	// replace-all apply would tear down and re-handshake (T-55c).
+	appliedKeys map[string]wgtypes.Key
 
 	// meshsock is the custom bind when the meshsock datapath is active (T-57);
 	// nil for kernel/plain-userspace WG. When set, ApplyPeers also feeds its
@@ -75,7 +81,7 @@ func NewDeviceManager(log *slog.Logger) *DeviceManager {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &DeviceManager{log: log, peerPaths: map[string]string{}}
+	return &DeviceManager{log: log, peerPaths: map[string]string{}, appliedKeys: map[string]wgtypes.Key{}}
 }
 
 // PublicKey returns the node's WG public key, generating the keypair on first
@@ -171,15 +177,31 @@ func (dm *DeviceManager) ApplyPeers(_ context.Context, peers *clusterv1.PeerSet)
 	if err != nil {
 		return err
 	}
+	// Reconcile INCREMENTALLY (replace_peers=false): update the desired peers in
+	// place and explicitly remove only those that vanished. A replace-all apply
+	// flushes every peer and resets its session — which on a worker join would
+	// tear down the control↔control raft tunnels and make the leader step down.
+	// Updating an existing peer with an unchanged endpoint/key does NOT reset its
+	// session, so the raft tunnels ride through unrelated peer churn (T-55c).
+	desired := make(map[string]wgtypes.Key, len(pcs))
+	for _, pc := range pcs {
+		desired[pc.publicKey.String()] = pc.publicKey
+	}
+	for hex, key := range dm.appliedKeys {
+		if _, ok := desired[hex]; !ok {
+			pcs = append(pcs, peerConfig{publicKey: key, remove: true})
+		}
+	}
 	// Do NOT re-send listen_port on peer updates: wireguard-go rebinds (closes +
 	// reopens) the socket whenever listen_port is set, so re-sending it on every
 	// ApplyPeers churns a custom (meshsock) bind until an Open races and leaves
 	// it closed (Send then fails with net.ErrClosed). The port is set once at
-	// device-up; peer updates only replace the peer set.
-	cfg := deviceConfig{privateKey: dm.priv, replacePeers: true, peers: pcs}
+	// device-up.
+	cfg := deviceConfig{privateKey: dm.priv, replacePeers: false, peers: pcs}
 	if err := dm.backend.apply(cfg); err != nil {
 		return fmt.Errorf("mesh: apply peers: %w", err)
 	}
+	dm.appliedKeys = desired
 	// Feed the meshsock path manager the peers' identities + candidate
 	// addresses so it can probe/punch toward them.
 	if dm.bind != nil {
