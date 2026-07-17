@@ -2903,10 +2903,11 @@
         "DEPLOYMENT_PHASE_SUCCEEDED",
         "DEPLOYMENT_PHASE_FAILED",
         "DEPLOYMENT_PHASE_ROLLED_BACK",
-        "DEPLOYMENT_PHASE_SUPERSEDED"
+        "DEPLOYMENT_PHASE_SUPERSEDED",
+        "DEPLOYMENT_PHASE_STOPPING_OLD"
       ],
       "default": "DEPLOYMENT_PHASE_UNSPECIFIED",
-      "description": "DeploymentPhase is the red/green state machine (spec §3.7). Every\ntransition is a Raft apply so a new leader resumes where the old one died.\n\n - DEPLOYMENT_PHASE_BUILDING: only for source deploys\n - DEPLOYMENT_PHASE_PLACING: green assignments created\n - DEPLOYMENT_PHASE_STARTING: waiting for running\n - DEPLOYMENT_PHASE_PROMOTING: atomic traffic switch\n - DEPLOYMENT_PHASE_DRAINING_OLD: blue kept warm for rollback_window\n - DEPLOYMENT_PHASE_FAILED: traffic never moved\n - DEPLOYMENT_PHASE_SUPERSEDED: a newer deployment for the same env appeared"
+      "description": "DeploymentPhase is the red/green state machine (spec §3.7). Every\ntransition is a Raft apply so a new leader resumes where the old one died.\n\n - DEPLOYMENT_PHASE_BUILDING: only for source deploys\n - DEPLOYMENT_PHASE_PLACING: green assignments created\n - DEPLOYMENT_PHASE_STARTING: waiting for running\n - DEPLOYMENT_PHASE_PROMOTING: atomic traffic switch\n - DEPLOYMENT_PHASE_DRAINING_OLD: blue kept warm for rollback_window\n - DEPLOYMENT_PHASE_FAILED: traffic never moved\n - DEPLOYMENT_PHASE_SUPERSEDED: a newer deployment for the same env appeared\n - DEPLOYMENT_PHASE_STOPPING_OLD: stateful stop-then-start: old instance stopping before the new one starts (T-63)"
     },
     "v1Domain": {
       "type": "object",
