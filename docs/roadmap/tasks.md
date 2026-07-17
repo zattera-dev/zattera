@@ -2489,7 +2489,7 @@ Phase 6 · Depends: T-53 · Size: M
 jitter determinism, failover skip.
 **Acceptance:** `go test ./internal/daemon/scheduler/ -run TestCron`
 
-### T-68 — Quorum-loss autonomy test + chaos expansion
+### T-68 — Quorum-loss autonomy test + chaos expansion  ✅ **DONE**
 Phase 6 · Depends: T-39, T-55 · Size: M
 **Files:** `test/chaos/quorum_test.go`, `test/chaos/relay_test.go`
 **Steps:**
