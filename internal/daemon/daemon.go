@@ -371,6 +371,16 @@ func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store
 	uploadsDir := filepath.Join(cfg.DataDir, "uploads")
 	deploySrv := api.NewDeployServer(st, rs, clk, uploadsDir)
 
+	// Volume service + snapshot dispatcher (T-62/T-65). Snapshots need the
+	// unsealed data key + backup config; a follower/sealed node serves volume
+	// CRUD but returns FailedPrecondition for snapshot ops.
+	volumeSrv := api.NewVolumeServer(st, rs, api.GRPCVolumeAgentDialer{Connect: agentLocalConnect}, clk, log)
+	var snapDispatcher *api.SnapshotDispatcher
+	if sealer != nil && keyring != nil {
+		snapDispatcher = api.NewSnapshotDispatcher(st, rs, sealer, keyring.DataKey(), agentLocalConnect, clk, log)
+		volumeSrv.WithSnapshots(snapDispatcher)
+	}
+
 	apiSrv, err := api.New(api.Options{
 		CA:                authority,
 		Listen:            cfg.API.Listen,
@@ -390,7 +400,7 @@ func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store
 		ExecService:       api.NewExecServer(st, api.GRPCExecDialer{Connect: agentLocalConnect}, log),
 		MetricsService:    api.NewMetricsServer(st, live, api.GRPCStatsDialer{Connect: agentLocalConnect}, clk, log),
 		JobService:        api.NewJobServer(st, rs, clk),
-		VolumeService:     api.NewVolumeServer(st, rs, api.GRPCVolumeAgentDialer{Connect: agentLocalConnect}, clk, log),
+		VolumeService:     volumeSrv,
 		AgentSyncService:  syncSrv,
 		JoinService:       joinSrv,
 		MeshService:       api.NewMeshServer(st, rs, clk, log),
@@ -443,6 +453,12 @@ func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store
 	// Autoscaler (T-61): the leader adjusts effective_replicas from observed
 	// CPU/memory/RPS against each env's Autoscale targets. Leader-gated internally.
 	go scheduler.NewAutoscaler(rs, live, clk, log).Run(ctx)
+
+	// Scheduled volume snapshots (T-65): the leader fires SnapshotPolicy.schedule
+	// snapshots and enforces keep_last. Only when snapshots are available.
+	if snapDispatcher != nil {
+		go scheduler.NewSnapshotScheduler(rs, snapDispatcher, clk, log).Run(ctx)
+	}
 
 	// Deployment orchestrator (T-26): the leader drives red/green deployments
 	// through their phases. Leader-gated internally.

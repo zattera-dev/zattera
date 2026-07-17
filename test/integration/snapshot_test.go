@@ -63,7 +63,7 @@ func TestSnapshotMinIO(t *testing.T) {
 	writeFile(t, src, "db/data.bin", bigData(256<<10, 1))
 	writeFile(t, src, "db/wal.log", []byte("write-ahead log\n"))
 
-	if _, err := eng.Snapshot(ctx, src, "snap1", time.Now().Unix()); err != nil {
+	if _, err := eng.Snapshot(ctx, src, "snap1", time.Now().Unix(), nil); err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
 
@@ -76,7 +76,7 @@ func TestSnapshotMinIO(t *testing.T) {
 
 	// A second snapshot sharing most chunks, then drop it and prune.
 	writeFile(t, src, "db/wal.log", []byte("write-ahead log\nmore\n"))
-	if _, err := eng.Snapshot(ctx, src, "snap2", time.Now().Unix()); err != nil {
+	if _, err := eng.Snapshot(ctx, src, "snap2", time.Now().Unix(), nil); err != nil {
 		t.Fatalf("snapshot 2: %v", err)
 	}
 	if n, err := eng.Prune(ctx); err != nil || n != 0 {

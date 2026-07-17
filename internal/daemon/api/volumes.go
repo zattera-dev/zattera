@@ -36,6 +36,7 @@ type VolumeServer struct {
 	raft  Applier
 	clock clock.Clock
 	dial  VolumeAgentDialer
+	snap  *SnapshotDispatcher // nil until the cluster is unsealed with a backup config
 	log   *slog.Logger
 }
 
@@ -49,6 +50,12 @@ func NewVolumeServer(store *state.Store, raft Applier, dial VolumeAgentDialer, c
 		log = slog.Default()
 	}
 	return &VolumeServer{store: store, raft: raft, clock: clk, dial: dial, log: log}
+}
+
+// WithSnapshots attaches the snapshot dispatcher (enables Snapshot/Restore).
+func (s *VolumeServer) WithSnapshots(d *SnapshotDispatcher) *VolumeServer {
+	s.snap = d
+	return s
 }
 
 // CreateVolume creates a named volume pinned to a node. When node_id is empty
@@ -96,6 +103,82 @@ func (s *VolumeServer) CreateVolume(ctx context.Context, req *zatterav1.CreateVo
 // ListVolumes returns the project's volumes.
 func (s *VolumeServer) ListVolumes(_ context.Context, req *zatterav1.ListVolumesRequest) (*zatterav1.ListVolumesResponse, error) {
 	return &zatterav1.ListVolumesResponse{Volumes: s.store.ListVolumes(req.GetProjectId())}, nil
+}
+
+// SnapshotVolume takes an on-demand snapshot of a volume and returns the
+// completed VolumeSnapshot record.
+func (s *VolumeServer) SnapshotVolume(ctx context.Context, req *zatterav1.SnapshotVolumeRequest) (*zatterav1.VolumeSnapshot, error) {
+	if s.snap == nil {
+		return nil, status.Error(codes.FailedPrecondition, "snapshots unavailable: cluster not unsealed or no backup destination")
+	}
+	v, ok := s.store.Volume(req.GetVolumeId())
+	if !ok || v.GetProjectId() != req.GetProjectId() {
+		return nil, status.Errorf(codes.NotFound, "volume %q not found", req.GetVolumeId())
+	}
+	snap, err := s.snap.RunSnapshot(ctx, v)
+	if err != nil {
+		return nil, toStatus(err)
+	}
+	return snap, nil
+}
+
+// ListSnapshots returns a volume's snapshots (newest first).
+func (s *VolumeServer) ListSnapshots(_ context.Context, req *zatterav1.ListSnapshotsRequest) (*zatterav1.ListSnapshotsResponse, error) {
+	v, ok := s.store.Volume(req.GetVolumeId())
+	if !ok || v.GetProjectId() != req.GetProjectId() {
+		return nil, status.Errorf(codes.NotFound, "volume %q not found", req.GetVolumeId())
+	}
+	return &zatterav1.ListSnapshotsResponse{Snapshots: s.store.ListVolumeSnapshots(req.GetVolumeId())}, nil
+}
+
+// RestoreSnapshot restores a snapshot into its volume. It refuses while the
+// volume is mounted — the service must be stopped first (single-writer).
+func (s *VolumeServer) RestoreSnapshot(ctx context.Context, req *zatterav1.RestoreSnapshotRequest) (*zatterav1.Volume, error) {
+	if s.snap == nil {
+		return nil, status.Error(codes.FailedPrecondition, "snapshots unavailable: cluster not unsealed or no backup destination")
+	}
+	v, ok := s.store.Volume(req.GetVolumeId())
+	if !ok || v.GetProjectId() != req.GetProjectId() {
+		return nil, status.Errorf(codes.NotFound, "volume %q not found", req.GetVolumeId())
+	}
+	if s.volumeMounted(v) {
+		return nil, status.Error(codes.FailedPrecondition,
+			"volume is in use; stop the service (scale its environment to 0 replicas) before restoring")
+	}
+	var snap *zatterav1.VolumeSnapshot
+	for _, sn := range s.store.ListVolumeSnapshots(req.GetVolumeId()) {
+		if sn.GetMeta().GetId() == req.GetSnapshotId() {
+			snap = sn
+			break
+		}
+	}
+	if snap == nil || snap.GetStatus() != zatterav1.SnapshotStatus_SNAPSHOT_STATUS_COMPLETE {
+		return nil, status.Errorf(codes.NotFound, "no completed snapshot %q for this volume", req.GetSnapshotId())
+	}
+
+	if err := s.setVolumeStatus(ctx, v, zatterav1.VolumeStatus_VOLUME_STATUS_RESTORING); err != nil {
+		return nil, toStatus(err)
+	}
+	if err := s.snap.Restore(ctx, v, snap.GetManifestKey()); err != nil {
+		_ = s.setVolumeStatus(ctx, v, zatterav1.VolumeStatus_VOLUME_STATUS_ACTIVE)
+		return nil, toStatus(err)
+	}
+	if err := s.setVolumeStatus(ctx, v, zatterav1.VolumeStatus_VOLUME_STATUS_ACTIVE); err != nil {
+		return nil, toStatus(err)
+	}
+	out, _ := s.store.Volume(req.GetVolumeId())
+	return out, nil
+}
+
+// setVolumeStatus re-reads and updates the volume's status.
+func (s *VolumeServer) setVolumeStatus(ctx context.Context, v *zatterav1.Volume, st zatterav1.VolumeStatus) error {
+	cur, ok := s.store.Volume(v.GetMeta().GetId())
+	if !ok {
+		return nil
+	}
+	cur.Status = st
+	cur.GetMeta().UpdatedAt = timestamppb.New(s.clock.Now())
+	return s.apply(ctx, &clusterv1.Command{Mutation: &clusterv1.Command_PutVolume{PutVolume: &clusterv1.PutVolume{Volume: cur}}})
 }
 
 // DeleteVolume removes a volume. It refuses while the volume is mounted (a live

@@ -6,10 +6,35 @@ description: Incremental S3 snapshots and one-command full-platform restore — 
 # Backup & disaster recovery
 
 ::: callout warning Work in progress
-Snapshot scheduling/CLI (T-65) and full-platform `zatterad restore` (T-66) are
-still on the [roadmap](../roadmap/tasks). The snapshot **engine** (T-64) has
-landed.
+Full-platform `zatterad restore` (T-66) is still on the
+[roadmap](../roadmap/tasks). Volume snapshots — the engine (T-64) and the
+scheduling/CLI (T-65) — have landed.
 :::
+
+## Volume snapshots
+
+Configure a destination bucket once (cluster-wide `BackupConfig`: S3 endpoint,
+bucket, and credentials, which are encrypted at rest), then snapshot on demand or
+on a schedule:
+
+```bash
+zattera volume snapshot <id>            # take one now, waits for completion
+zattera volume snapshots <id>           # id, status, size, created
+zattera volume restore <id> --snapshot <snap-id>   # service must be stopped first
+```
+
+Scheduled snapshots and retention come from the volume's `SnapshotPolicy`
+(settable when creating the volume):
+
+- **`schedule`** — a 5-field cron expression; the leader fires a snapshot each
+  due slot. An optional **`pre_hook`** command runs inside the mounting container
+  first (e.g. `pg_dump` to quiesce the database).
+- **`keep_last`** (default 7) — older snapshots beyond this count are deleted and
+  their now-orphaned chunks garbage-collected.
+
+A snapshot runs on the volume's pinned node: the control plane dials that node,
+which streams progress back. Restore refuses while the volume is mounted — stop
+the service (scale its environment to 0) first.
 
 **What it will do:** content-addressed, encrypted, incremental snapshots of
 volumes and platform state to any S3-compatible bucket — and `zatterad restore`

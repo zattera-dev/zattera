@@ -16,9 +16,9 @@ something runnable.
 > leadership-reactive device loops) is optional. **T-57/T-57c** (meshsock),
 > **T-59/T-60** (ring TSDB metrics sampler + historical stats API/CLI),
 > **T-61** (CPU/mem/RPS autoscaler), **T-62** (node-pinned volumes + fencing
-> leases), **T-63** (stateful stop-then-start deploys) and **T-64** (content-
-> addressed snapshot engine) are done. Next up: T-65 (snapshot orchestration +
-> CLI).
+> leases), **T-63** (stateful stop-then-start deploys), **T-64** (content-
+> addressed snapshot engine) and **T-65** (snapshot orchestration + CLI) are
+> done. Next up: T-66 (full backup + `zatterad restore`).
 
 ## What already exists (do not rebuild)
 
@@ -2358,8 +2358,36 @@ snapshot→wipe→restore→byte-identical dir; prune leaves shared chunks.
 **Acceptance:** `go test ./internal/daemon/volumes/`;
 `go test -tags integration -run TestSnapshotMinIO ./test/integration/`
 
-### T-65 — Volume snapshot orchestration + CLI
+### T-65 — Volume snapshot orchestration + CLI  ✅ **DONE** (file-ops/`cp` → T-77)
 Phase 6 · Depends: T-64, T-49 · Size: M
+**Landed:**
+- **Agent** (`internal/daemon/agent/volumeops.go`): `SnapshotVolume` (optional
+  pre-hook via `rt.Exec` in the mounting container → engine snapshot of the
+  volume host path → `VolumeOpProgress` stream with the manifest key) and
+  `RestoreVolume` (engine restore into the host path), implemented on
+  `LocalServer` (it already holds the runtime). The T-64 engine gained a
+  `Progress` callback (uploaded bytes).
+- **Control** (`internal/daemon/api/volumeops.go`): `SnapshotDispatcher` builds an
+  `S3Target` from the unsealed `BackupConfig` creds + cluster data key, dials the
+  volume's node, streams the op, and records a `VolumeSnapshot`
+  (RUNNING→COMPLETE/FAILED). `VolumeService.SnapshotVolume`/`ListSnapshots`/
+  `RestoreSnapshot` (restore refuses while mounted). Wired in `daemon.go` (only
+  when unsealed with a backup config).
+- **Scheduler** (`internal/daemon/scheduler/snapshots.go`): a leader loop parses
+  `SnapshotPolicy.schedule` (robfig/cron), fires a snapshot each due slot
+  (baseline = last snapshot / volume creation; per-volume `lastFire` guard), and
+  enforces `keep_last` (default 7) — deleting old `VolumeSnapshot` records
+  (`DeleteVolumeSnapshot` command, added additively + regen) and pruning their
+  chunks via the dispatcher.
+- **CLI**: `zattera volume snapshot/snapshots/restore`.
+**Tests:** `TestSnapshotSchedule` (cron due-firing once per slot, manual-only
+no-op, keep_last + default-7 pruning); api `TestSnapshotRPCsRequireDispatcher`,
+`TestRestoreRefusesWhileMounted`, `TestSnapshotDispatcherS3Target` (creds unseal).
+**Deferred to T-77:** the volume **file ops** (`ListVolumeFiles`/`ReadVolumeFile`/
+`WriteVolumeFile`) and `volume cp` — these power the read-only `volume browse`
+that T-77 owns; the RPCs stay Unimplemented until then.
+**Acceptance:** `go test ./internal/daemon/scheduler/ -run TestSnapshotSchedule` ✅
+**Original spec below.**
 **Files:** `internal/daemon/agent/volumeops.go` (AgentLocal Snapshot/Restore/
 ListFiles/Read/Write), `internal/daemon/scheduler/snapshots.go` (schedules),
 `internal/cli/volume.go`

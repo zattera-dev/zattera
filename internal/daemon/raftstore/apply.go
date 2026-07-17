@@ -121,6 +121,8 @@ func (f *FSM) apply(cmd *clusterv1.Command) error {
 		s.SetVolumeLease(m.PutVolumeLease.GetVolumeId(), m.PutVolumeLease.GetLease())
 	case *clusterv1.Command_PutVolumeSnapshot:
 		s.PutVolumeSnapshot(m.PutVolumeSnapshot.GetSnapshot())
+	case *clusterv1.Command_DeleteVolumeSnapshot:
+		s.DeleteVolumeSnapshot(m.DeleteVolumeSnapshot.GetId())
 	case *clusterv1.Command_PutBackupConfig:
 		s.SetBackupConfig(m.PutBackupConfig.GetConfig())
 	case *clusterv1.Command_PutBackupRecord:

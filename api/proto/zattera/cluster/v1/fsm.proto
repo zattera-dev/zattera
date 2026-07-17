@@ -87,6 +87,7 @@ message Command {
     DeleteByID delete_volume = 211;
     PutVolumeLease put_volume_lease = 212;
     PutVolumeSnapshot put_volume_snapshot = 213;
+    DeleteByID delete_volume_snapshot = 246; // keep_last retention (T-65)
     PutBackupConfig put_backup_config = 214;
     PutBackupRecord put_backup_record = 215;
     PutNetworkAllocation put_network_allocation = 216;

@@ -82,10 +82,14 @@ func NewEngine(store ObjectStore, key []byte, opts Options) (*Engine, error) {
 	return &Engine{store: store, key: append([]byte(nil), key...), opts: opts, enc: enc, dec: dec}, nil
 }
 
+// Progress reports cumulative uploaded bytes during a snapshot (bytesTotal is 0
+// — the tar size is unknown until the walk finishes). nil disables reporting.
+type Progress func(bytesUploaded int64)
+
 // Snapshot tars srcPath, chunks + dedups + stores it, writes the manifest under
 // snapshotID, and returns the manifest. createdAtUnix stamps the manifest (the
-// caller owns the clock).
-func (e *Engine) Snapshot(ctx context.Context, srcPath, snapshotID string, createdAtUnix int64) (*Manifest, error) {
+// caller owns the clock). progress may be nil.
+func (e *Engine) Snapshot(ctx context.Context, srcPath, snapshotID string, createdAtUnix int64, progress Progress) (*Manifest, error) {
 	pr, pw := io.Pipe()
 	go func() { pw.CloseWithError(writeDeterministicTar(pw, srcPath)) }()
 
@@ -98,6 +102,7 @@ func (e *Engine) Snapshot(ctx context.Context, srcPath, snapshotID string, creat
 	}
 
 	m := &Manifest{Version: manifestVer, CreatedAtUnix: createdAtUnix}
+	var uploaded int64
 	for {
 		chunk, err := chunker.Next()
 		if err == io.EOF {
@@ -125,6 +130,10 @@ func (e *Engine) Snapshot(ctx context.Context, srcPath, snapshotID string, creat
 		}
 		if err := e.store.Put(ctx, key, sealed); err != nil {
 			return nil, err
+		}
+		uploaded += int64(chunk.Length)
+		if progress != nil {
+			progress(uploaded)
 		}
 	}
 

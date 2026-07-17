@@ -92,6 +92,9 @@ Node-pinned persistent volumes for stateful services. See [Volumes](../data/volu
 | `zt volume ls` | List the project's volumes: id, name, env, node, status |
 | `zt volume create <name> [--app NAME] [--env NAME] [--node ID]` | Create a volume (pins to `--node` or the least-used healthy node) |
 | `zt volume rm <id>` | Delete a volume (refused while its service is running) |
+| `zt volume snapshot <id>` | Take an on-demand snapshot |
+| `zt volume snapshots <id>` | List a volume's snapshots: id, status, size, created |
+| `zt volume restore <id> --snapshot <snap-id>` | Restore a snapshot (service must be stopped) |
 
 ## Custom domains
 

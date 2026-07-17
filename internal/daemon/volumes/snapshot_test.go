@@ -123,7 +123,7 @@ func TestSnapshotRestoreByteIdentical(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := eng.Snapshot(ctx, src, "snap1", fixedMtime.Unix()); err != nil {
+	if _, err := eng.Snapshot(ctx, src, "snap1", fixedMtime.Unix(), nil); err != nil {
 		t.Fatalf("snapshot: %v", err)
 	}
 
@@ -143,7 +143,7 @@ func TestChunkingStabilityAndDedup(t *testing.T) {
 	store := NewMemStore()
 	eng, _ := NewEngine(store, testKey(), smallChunks)
 
-	m1, err := eng.Snapshot(ctx, src, "s1", 1)
+	m1, err := eng.Snapshot(ctx, src, "s1", 1, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestChunkingStabilityAndDedup(t *testing.T) {
 
 	// Snapshot the SAME data again: identical chunk set, and no new chunk
 	// objects (only a second manifest).
-	m2, err := eng.Snapshot(ctx, src, "s2", 2)
+	m2, err := eng.Snapshot(ctx, src, "s2", 2, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestChunkingStabilityAndDedup(t *testing.T) {
 	data := genData(512<<10, 99)
 	data[200<<10] ^= 0xFF
 	writeTree(t, src, map[string][]byte{"big.bin": data})
-	m3, err := eng.Snapshot(ctx, src, "s3", 3)
+	m3, err := eng.Snapshot(ctx, src, "s3", 3, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,13 +192,13 @@ func TestPruneLeavesSharedChunks(t *testing.T) {
 	store := NewMemStore()
 	eng, _ := NewEngine(store, testKey(), smallChunks)
 
-	m1, _ := eng.Snapshot(ctx, src, "s1", 1)
+	m1, _ := eng.Snapshot(ctx, src, "s1", 1, nil)
 
 	// A second snapshot with a localized change: shares most chunks, adds a few.
 	data := genData(256<<10, 5)
 	data[100<<10] ^= 0xAA
 	writeTree(t, src, map[string][]byte{"big.bin": data})
-	m2, _ := eng.Snapshot(ctx, src, "s2", 2)
+	m2, _ := eng.Snapshot(ctx, src, "s2", 2, nil)
 
 	// Both live → prune removes nothing.
 	if n, err := eng.Prune(ctx); err != nil || n != 0 {

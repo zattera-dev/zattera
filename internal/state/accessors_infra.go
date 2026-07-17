@@ -462,6 +462,15 @@ func (s *Store) PutVolumeSnapshot(snap *zatterav1.VolumeSnapshot) {
 	s.touch(KindVolumeSnapshot, id)
 }
 
+func (s *Store) DeleteVolumeSnapshot(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.volumeSnapshots[id]; ok {
+		delete(s.volumeSnapshots, id)
+		s.touch(KindVolumeSnapshot, id)
+	}
+}
+
 func (s *Store) ListVolumeSnapshots(volumeID string) []*zatterav1.VolumeSnapshot {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
