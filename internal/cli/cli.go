@@ -48,6 +48,7 @@ func Commands() []*cobra.Command {
 		newStatsCmd(),
 		newJobsCmd(),
 		newVolumesCmd(),
+		newBackupCmd(),
 	}
 	for _, c := range cmds {
 		c.PersistentFlags().BoolVar(&jsonFlag, "json", false, "machine-readable output")

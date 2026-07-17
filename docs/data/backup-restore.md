@@ -10,18 +10,24 @@ snapshots) and the **whole control plane** (state + CA + keys) to any
 S3-compatible bucket, and rebuilds a cluster from a backup with a single
 `zatterad restore`.
 
-::: callout warning Configuring the destination is not wired yet
-Snapshots and backups read a cluster-wide `BackupConfig` (S3 endpoint, bucket,
-and credentials, encrypted at rest), but the API/CLI to **set** it
-(`BackupService.SetBackupConfig`) is still on the [roadmap](../roadmap/tasks).
-Until it ships, the snapshot and restore commands below have no destination to
-write to; the [`zatterad restore`](#disaster-recovery) path takes its S3 target
-directly on the command line and works today.
-:::
+## Configure the destination
+
+Point the cluster at an S3-compatible bucket once (admin only). The credentials
+are **sealed with the cluster data key** before they touch storage:
+
+```bash
+zt backup config --bucket my-backups --region eu-west-1 \
+  --access-key "$AWS_ACCESS_KEY_ID" --secret-key "$AWS_SECRET_ACCESS_KEY"
+# MinIO / self-hosted: add --endpoint http://minio.internal:9000
+zt backup ls                      # show the destination + past backups
+```
+
+Snapshots and full backups both write here. (`zatterad restore` is the exception:
+it runs before the cluster exists, so it takes its S3 target on the command line.)
 
 ## Volume snapshots
 
-With a destination configured, snapshot a volume on demand or on a schedule:
+Snapshot a volume on demand or on a schedule:
 
 ```bash
 zattera volume snapshot <id>            # take one now, waits for completion
@@ -68,15 +74,21 @@ quiescing a live database is the `pre_hook`'s job (above).
 
 A full backup captures the whole control plane to the same S3 bucket:
 
+```bash
+zt backup run     # state + CA + key material + volume snapshot refs
+```
+
+It writes:
+
 - the **raft state** (all projects, apps, environments, volumes, …), encrypted
   with the cluster data key;
 - the **cluster CA** cert + key (encrypted) — so restored nodes' certificates
   stay valid;
-- the **data key itself**, sealed under a recovery **passphrase** — the only way
-  back in;
+- the cluster's **sealed data key** (the same one you unseal with your recovery
+  passphrase) — the only way back in;
 - an **index** referencing each volume's latest snapshot.
 
-To rebuild onto fresh infrastructure:
+To rebuild onto fresh infrastructure (using the cluster's recovery passphrase):
 
 ```bash
 zatterad restore --from s3://my-bucket/zattera \

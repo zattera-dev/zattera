@@ -377,9 +377,11 @@ func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store
 	// CRUD but returns FailedPrecondition for snapshot ops.
 	volumeSrv := api.NewVolumeServer(st, rs, api.GRPCVolumeAgentDialer{Connect: agentLocalConnect}, clk, log)
 	var snapDispatcher *api.SnapshotDispatcher
+	var backupSrv zatterav1.BackupServiceServer // nil interface on a sealed node
 	if sealer != nil && keyring != nil {
 		snapDispatcher = api.NewSnapshotDispatcher(st, rs, sealer, keyring.DataKey(), agentLocalConnect, clk, log)
 		volumeSrv.WithSnapshots(snapDispatcher)
+		backupSrv = api.NewBackupServer(st, rs, sealer, authority, clk)
 	}
 
 	apiSrv, err := api.New(api.Options{
@@ -402,6 +404,7 @@ func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store
 		MetricsService:    api.NewMetricsServer(st, live, api.GRPCStatsDialer{Connect: agentLocalConnect}, clk, log),
 		JobService:        api.NewJobServer(st, rs, clk),
 		VolumeService:     volumeSrv,
+		BackupService:     backupSrv,
 		AgentSyncService:  syncSrv,
 		JoinService:       joinSrv,
 		MeshService:       api.NewMeshServer(st, rs, clk, log),

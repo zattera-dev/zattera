@@ -13,10 +13,12 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	zatterav1 "github.com/zattera-dev/zattera/api/gen/zattera/v1"
+	"github.com/zattera-dev/zattera/internal/daemon/api"
 	"github.com/zattera-dev/zattera/internal/daemon/backup"
 	"github.com/zattera-dev/zattera/internal/daemon/raftstore"
 	"github.com/zattera-dev/zattera/internal/daemon/secrets"
 	"github.com/zattera-dev/zattera/internal/daemon/volumes"
+	"github.com/zattera-dev/zattera/internal/pkgutil/clock"
 	"github.com/zattera-dev/zattera/internal/pkgutil/ids"
 	"github.com/zattera-dev/zattera/internal/state"
 )
@@ -56,8 +58,14 @@ func TestDisasterRecovery(t *testing.T) {
 		t.Fatalf("volume snapshot: %v", err)
 	}
 
-	// Seed cluster state referencing that snapshot.
-	st := state.New()
+	// Seed cluster state into a raft store (the BackupService applies through it).
+	rs := raftstore.NewTestStore(t)
+	st := rs.State()
+	km, err := secrets.SealDataKey(dataKey, drPass, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.SetClusterKeyMaterial(km)
 	st.PutProject(&zatterav1.Project{Meta: &zatterav1.Meta{Id: "p1"}, Name: "web"})
 	st.PutApp(&zatterav1.App{Meta: &zatterav1.Meta{Id: "app1"}, ProjectId: "p1", Name: "api"})
 	st.PutEnvironment(&zatterav1.Environment{Meta: &zatterav1.Meta{Id: "e1"}, ProjectId: "p1", AppId: "app1", Name: "production"})
@@ -68,13 +76,17 @@ func TestDisasterRecovery(t *testing.T) {
 		VolumeId: "v1", ManifestKey: "snapA", Status: zatterav1.SnapshotStatus_SNAPSHOT_STATUS_COMPLETE,
 	})
 
-	// Back up.
-	idx, err := backup.Backup(ctx, backup.Input{
-		Store: st, ObjectStore: store, Sealer: sealer, DataKey: dataKey, Passphrase: drPass,
-		KeyVersion: 1, CACertPEM: []byte("CACERT"), CAKeyPEM: []byte("CAKEY"), Now: time.Now(),
-	})
-	if err != nil {
-		t.Fatalf("backup: %v", err)
+	// Configure the destination and run a full backup through the wired service.
+	srv := api.NewBackupServer(st, rs, sealer, drCA{}, clock.Real{})
+	if _, err := srv.SetBackupConfig(ctx, &zatterav1.SetBackupConfigRequest{
+		Config:           &zatterav1.BackupConfig{S3Endpoint: "http://" + endpoint, S3Bucket: minioBucket, S3Prefix: "dr/", S3Region: "us-east-1"},
+		S3AccessKeyPlain: minioAccess,
+		S3SecretKeyPlain: minioSecret,
+	}); err != nil {
+		t.Fatalf("set backup config: %v", err)
+	}
+	if _, err := srv.TriggerBackup(ctx, &zatterav1.TriggerBackupRequest{Kind: "full"}); err != nil {
+		t.Fatalf("trigger backup: %v", err)
 	}
 
 	// Restore into a fresh data dir.
@@ -88,9 +100,13 @@ func TestDisasterRecovery(t *testing.T) {
 	// Reopen the restored raft store and assert state equality.
 	assertRestoredState(t, dataDir)
 
-	// The backup index references the volume's snapshot, and its manifest is
-	// present in the store — i.e. the snapshot is recoverable. (The byte-identical
-	// chunk restore itself is covered by TestSnapshotMinIO.)
+	// Verify decodes the backup index; it references the volume's snapshot, whose
+	// manifest is present. (The byte-identical chunk restore is covered by
+	// TestSnapshotMinIO.)
+	idx, _, err := backup.Verify(ctx, store, drPass)
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
 	if len(idx.Volumes) != 1 || idx.Volumes[0].ManifestKey != "snapA" {
 		t.Fatalf("index volume ref wrong: %+v", idx.Volumes)
 	}
@@ -98,6 +114,12 @@ func TestDisasterRecovery(t *testing.T) {
 		t.Fatalf("referenced snapshot manifest missing from the store (ok=%v err=%v)", ok, err)
 	}
 }
+
+// drCA is a stand-in CA whose PEMs are backed up and restored verbatim.
+type drCA struct{}
+
+func (drCA) CABundlePEM() []byte            { return []byte("CACERT") }
+func (drCA) PrivateKeyPEM() ([]byte, error) { return []byte("CAKEY"), nil }
 
 func assertRestoredState(t *testing.T, dataDir string) {
 	t.Helper()

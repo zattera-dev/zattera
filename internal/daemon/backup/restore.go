@@ -45,11 +45,11 @@ func Restore(ctx context.Context, in RestoreInput) (*Index, error) {
 		return nil, err
 	}
 
-	dataKey, err := unsealDataKey(ctx, in.ObjectStore, dir, in.Passphrase)
+	dataKey, keyVersion, err := unsealDataKey(ctx, in.ObjectStore, dir, in.Passphrase)
 	if err != nil {
 		return nil, err
 	}
-	sealer, err := secrets.NewSealer(dataKey, idx.KeyVersion)
+	sealer, err := secrets.NewSealer(dataKey, keyVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -76,11 +76,11 @@ func Verify(ctx context.Context, store volumes.ObjectStore, passphrase string) (
 	if err != nil {
 		return nil, nil, err
 	}
-	dataKey, err := unsealDataKey(ctx, store, dir, passphrase)
+	dataKey, keyVersion, err := unsealDataKey(ctx, store, dir, passphrase)
 	if err != nil {
 		return nil, nil, err
 	}
-	sealer, err := secrets.NewSealer(dataKey, idx.KeyVersion)
+	sealer, err := secrets.NewSealer(dataKey, keyVersion)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -114,20 +114,20 @@ func loadIndex(ctx context.Context, store volumes.ObjectStore) (dir string, idx 
 	return dir, idx, nil
 }
 
-func unsealDataKey(ctx context.Context, store volumes.ObjectStore, dir, passphrase string) ([]byte, error) {
+func unsealDataKey(ctx context.Context, store volumes.ObjectStore, dir, passphrase string) ([]byte, uint32, error) {
 	raw, err := store.Get(ctx, dir+keysObj)
 	if err != nil {
-		return nil, fmt.Errorf("restore: read key material: %w", err)
+		return nil, 0, fmt.Errorf("restore: read key material: %w", err)
 	}
 	var km zatterav1.ClusterKeyMaterial
 	if err := proto.Unmarshal(raw, &km); err != nil {
-		return nil, fmt.Errorf("restore: decode key material: %w", err)
+		return nil, 0, fmt.Errorf("restore: decode key material: %w", err)
 	}
 	dataKey, err := secrets.UnsealDataKey(&km, passphrase)
 	if err != nil {
-		return nil, fmt.Errorf("restore: wrong passphrase or corrupt key material: %w", err)
+		return nil, 0, fmt.Errorf("restore: wrong passphrase or corrupt key material: %w", err)
 	}
-	return dataKey, nil
+	return dataKey, km.GetKeyVersion(), nil
 }
 
 func decodeState(ctx context.Context, store volumes.ObjectStore, dir string, sealer secrets.Sealer) (*clusterv1.Snapshot, error) {

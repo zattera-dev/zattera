@@ -96,6 +96,16 @@ Node-pinned persistent volumes for stateful services. See [Volumes](../data/volu
 | `zt volume snapshots <id>` | List a volume's snapshots: id, status, size, created |
 | `zt volume restore <id> --snapshot <snap-id>` | Restore a snapshot (service must be stopped) |
 
+## Backup & disaster recovery
+
+Cluster-wide backups (admin). See [Backup & disaster recovery](../data/backup-restore).
+
+| Command | Description |
+| --- | --- |
+| `zt backup config --bucket NAME [--endpoint URL] [--region R] [--prefix P] [--access-key K] [--secret-key S]` | Set the S3 destination (credentials sealed server-side) |
+| `zt backup run` | Run a full backup now (state + CA + volume snapshot refs) |
+| `zt backup ls` | List past backups and the current destination |
+
 ## Custom domains
 
 Defaults to `--env staging`. See [Custom domains](../deploy/custom-domains).

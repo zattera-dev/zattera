@@ -54,6 +54,11 @@ var minRole = map[string]zatterav1.Role{
 	"/zattera.v1.VolumeService/CreateVolume": zatterav1.Role_ROLE_DEVELOPER,
 	"/zattera.v1.VolumeService/DeleteVolume": zatterav1.Role_ROLE_DEVELOPER,
 	"/zattera.v1.VolumeService/ListVolumes":  zatterav1.Role_ROLE_VIEWER,
+
+	// BackupService (T-66) — cluster-wide admin
+	"/zattera.v1.BackupService/SetBackupConfig": zatterav1.Role_ROLE_ADMIN,
+	"/zattera.v1.BackupService/TriggerBackup":   zatterav1.Role_ROLE_ADMIN,
+	"/zattera.v1.BackupService/ListBackups":     zatterav1.Role_ROLE_ADMIN,
 }
 
 // RBAC enforces per-project roles. It resolves the request's project_id field

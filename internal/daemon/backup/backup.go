@@ -63,9 +63,10 @@ type Input struct {
 	Store       *state.Store
 	ObjectStore volumes.ObjectStore
 	Sealer      secrets.Sealer // built from the cluster data key (state/CA crypto)
-	DataKey     []byte         // sealed under the passphrase into the key material
-	Passphrase  string
-	KeyVersion  uint32
+	// KeyMaterial is the cluster's data key already sealed under the recovery
+	// passphrase (from state) — stored verbatim so restore unseals with that same
+	// passphrase. No fresh passphrase is needed at backup time.
+	KeyMaterial *zatterav1.ClusterKeyMaterial
 	CACertPEM   []byte
 	CAKeyPEM    []byte
 	Now         time.Time
@@ -79,8 +80,8 @@ type caMaterial struct {
 // Backup writes a full backup and returns its index. It never mutates cluster
 // state (the caller records a BackupRecord).
 func Backup(ctx context.Context, in Input) (*Index, error) {
-	if in.Passphrase == "" {
-		return nil, fmt.Errorf("backup: a passphrase is required")
+	if in.KeyMaterial == nil {
+		return nil, fmt.Errorf("backup: cluster key material is required")
 	}
 	ts := in.Now.Unix()
 	dir := fmt.Sprintf("%s%d/", backupsDir, ts)
@@ -104,12 +105,8 @@ func Backup(ctx context.Context, in Input) (*Index, error) {
 		return nil, err
 	}
 
-	// Data key, sealed under the passphrase — the only way back in.
-	km, err := secrets.SealDataKey(in.DataKey, in.Passphrase, in.KeyVersion)
-	if err != nil {
-		return nil, fmt.Errorf("backup: seal data key: %w", err)
-	}
-	kmBytes, err := proto.Marshal(km)
+	// The cluster's sealed data key (passphrase-protected) — the only way back in.
+	kmBytes, err := proto.Marshal(in.KeyMaterial)
 	if err != nil {
 		return nil, err
 	}
@@ -133,7 +130,7 @@ func Backup(ctx context.Context, in Input) (*Index, error) {
 
 // buildIndex records node ids and each volume's latest completed snapshot.
 func (in Input) buildIndex(ts int64) *Index {
-	idx := &Index{Version: indexVer, Kind: indexKind, TimestampUnix: ts, KeyVersion: in.KeyVersion}
+	idx := &Index{Version: indexVer, Kind: indexKind, TimestampUnix: ts, KeyVersion: in.KeyMaterial.GetKeyVersion()}
 	for _, n := range in.Store.ListNodes() {
 		idx.NodeIDs = append(idx.NodeIDs, n.GetMeta().GetId())
 	}

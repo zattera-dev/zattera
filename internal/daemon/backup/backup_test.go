@@ -36,9 +36,13 @@ func backupInput(t *testing.T, st *state.Store, store volumes.ObjectStore, pass 
 	if err != nil {
 		t.Fatal(err)
 	}
+	km, err := secrets.SealDataKey(dataKey, pass, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
 	return Input{
-		Store: st, ObjectStore: store, Sealer: sealer, DataKey: dataKey, Passphrase: pass,
-		KeyVersion: 3, CACertPEM: []byte("CERT"), CAKeyPEM: []byte("KEY"), Now: time.Unix(2000, 0),
+		Store: st, ObjectStore: store, Sealer: sealer, KeyMaterial: km,
+		CACertPEM: []byte("CERT"), CAKeyPEM: []byte("KEY"), Now: time.Unix(2000, 0),
 	}
 }
 
@@ -90,8 +94,10 @@ func TestVerifyWrongPassphraseFails(t *testing.T) {
 	}
 }
 
-func TestBackupRequiresPassphrase(t *testing.T) {
-	if _, err := Backup(context.Background(), backupInput(t, seedState(t), volumes.NewMemStore(), "")); err == nil {
-		t.Fatal("backup without a passphrase must fail")
+func TestBackupRequiresKeyMaterial(t *testing.T) {
+	in := backupInput(t, seedState(t), volumes.NewMemStore(), "pass")
+	in.KeyMaterial = nil
+	if _, err := Backup(context.Background(), in); err == nil {
+		t.Fatal("backup without cluster key material must fail")
 	}
 }

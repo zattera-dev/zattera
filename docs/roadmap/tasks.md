@@ -2431,15 +2431,18 @@ passphrase fails, passphrase required); integration `TestDisasterRecovery`
 (MinIO: seed state + a real volume snapshot → backup → restore into a fresh dir →
 reopen raft and assert projects/apps/envs restored + old node DOWN with preserved
 mesh IP + the volume snapshot still restores byte-identical).
-**Deferred (follow-ups):** **`BackupService.SetBackupConfig`** — the proto +
-policy stub exist but there is no server/CLI to SET the cluster `BackupConfig`
-(S3 destination + creds), so T-65 snapshots and this backup can't run in a real
-cluster yet (tests inject the config / pass the S3 target directly, and
-`zatterad restore` takes its target on the command line). Also: the leader backup
-**schedule/API** trigger + the weekly `Verify` loop wiring; **registry blob**
-backup/restore; the live worker-**rejoin** volume-data restore choreography (the
-index records what to restore; the `RestoreSnapshot` API + a rejoining worker do
-the actual data restore).
+**`BackupService` (added):** `SetBackupConfig` (seals the S3 creds with the data
+key + stores the destination), `TriggerBackup` (runs a full backup now, reusing
+the cluster's existing sealed key material — no fresh passphrase), `ListBackups`
+(records + credential-redacted config); admin-only; `zt backup config/run/ls`.
+This is what makes T-65 snapshots + this backup reachable in a real cluster. The
+DR integration test now drives the wired path (`SetBackupConfig` → `TriggerBackup`
+→ restore).
+**Deferred (follow-ups):** **scheduled** backups (a periodic `TriggerBackup`) +
+the weekly `Verify` loop; **registry blob** backup/restore; the live
+worker-**rejoin** volume-data restore choreography (the index records what to
+restore; the `RestoreSnapshot` API + a rejoining worker do the actual data
+restore).
 **Acceptance:** `go test -tags integration -run TestDisasterRecovery ./test/integration/` ✅
 **Original spec below.**
 **Files:** `internal/daemon/backup/{backup.go,restore.go}`, CLI `backup.go`,
