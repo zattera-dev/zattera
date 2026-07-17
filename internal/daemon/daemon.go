@@ -439,6 +439,10 @@ func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store
 	// assignments. Leader-gated internally.
 	go scheduler.New(rs, clk, log).Run(ctx)
 
+	// Autoscaler (T-61): the leader adjusts effective_replicas from observed
+	// CPU/memory/RPS against each env's Autoscale targets. Leader-gated internally.
+	go scheduler.NewAutoscaler(rs, live, clk, log).Run(ctx)
+
 	// Deployment orchestrator (T-26): the leader drives red/green deployments
 	// through their phases. Leader-gated internally.
 	go scheduler.NewOrchestrator(rs, clk, log).Run(ctx)

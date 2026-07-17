@@ -100,7 +100,7 @@ If you declare nothing and the app has an HTTP port, you get the HTTP `/healthz`
 | Key | Default | Meaning |
 | --- | ------- | ------- |
 | `replicas` | `1` | Fixed replica count (sets min = max) |
-| `min_replicas` / `max_replicas` | `1` / `1` | Replica range (the range beyond min is used by [autoscaling](../scaling/autoscaling), WIP) |
+| `min_replicas` / `max_replicas` | `1` / `1` | Replica range (the range beyond min is used by [autoscaling](../scaling/autoscaling)) |
 | `domains` | — | [Custom domains](custom-domains) for this environment |
 | `command` | image default | Override the container command |
 | `stop_grace` | `10s` | Graceful-stop window before kill |
@@ -108,7 +108,7 @@ If you declare nothing and the app has an HTTP port, you get the HTTP `/healthz`
 | `idle_timeout` | — | [Scale-to-zero](../scaling/scale-to-zero) idle window *(WIP)* |
 | `scale_to_zero` / `max_concurrency` | — | Serverless mode *(WIP)* |
 | `[env.<name>.resources]` | — | `cpu_millis`, `memory_mb` reservations (used for placement) |
-| `[env.<name>.autoscale]` | — | `target_cpu_percent`, `target_memory_percent`, `target_rps_per_replica` *(WIP)* |
+| `[env.<name>.autoscale]` | — | [Autoscaling](../scaling/autoscaling) targets: `target_cpu_percent`, `target_memory_percent`, `target_rps_per_replica` |
 | `[env.<name>.placement]` | — | Node label constraints (string map) |
 
 #### `[[env.<name>.ports]]`

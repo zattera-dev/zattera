@@ -114,6 +114,12 @@ type Agent struct {
 	// echoed in the hello so control can skip a redundant resend.
 	mu                sync.Mutex
 	assignmentVersion uint64
+
+	// liveMu guards the latest per-instance/per-env samples the metrics sampler
+	// publishes; heartbeats attach them so livestate feeds the autoscaler (T-61).
+	liveMu        sync.Mutex
+	liveInstances map[string]*clusterv1.InstanceSample
+	liveProxy     map[string]*clusterv1.ProxySample
 }
 
 // New builds an Agent, filling defaults.
@@ -162,8 +168,25 @@ func New(cfg Config) *Agent {
 		if a.executor != nil {
 			a.sampler.instances = a.executor.InstanceStats
 		}
+		a.sampler.publish = a.publishLive
 	}
 	return a
+}
+
+// publishLive stores the latest samples for the heartbeat to attach.
+func (a *Agent) publishLive(instances map[string]*clusterv1.InstanceSample, proxy map[string]*clusterv1.ProxySample) {
+	a.liveMu.Lock()
+	a.liveInstances = instances
+	a.liveProxy = proxy
+	a.liveMu.Unlock()
+}
+
+// liveSamples returns the most recently published per-instance and per-env
+// samples (nil until the first sampler tick).
+func (a *Agent) liveSamples() (map[string]*clusterv1.InstanceSample, map[string]*clusterv1.ProxySample) {
+	a.liveMu.Lock()
+	defer a.liveMu.Unlock()
+	return a.liveInstances, a.liveProxy
 }
 
 // Executor returns the node's executor (nil when the agent runs without a

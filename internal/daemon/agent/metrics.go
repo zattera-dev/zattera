@@ -69,6 +69,11 @@ type metricsSampler struct {
 	node      NodeMetricsFunc
 	instances InstanceMetricsFunc
 	proxy     ProxyMetricsFunc
+	// publish, when set, receives the latest per-instance and per-env samples
+	// each tick so the heartbeat can attach them to livestate (T-61). The
+	// sampler is the SOLE caller of proxy() — which resets the RPS window — so
+	// the heartbeat reads the published copy instead of sampling again.
+	publish func(map[string]*clusterv1.InstanceSample, map[string]*clusterv1.ProxySample)
 }
 
 // Run samples until ctx is canceled. It takes one sample immediately so a
@@ -104,7 +109,9 @@ func (m *metricsSampler) sample(ctx context.Context) {
 		rec("net_tx_bytes", scopeNode, m.nodeID, n.NetTxBytes)
 	}
 
+	var instSamples map[string]*clusterv1.InstanceSample
 	if m.instances != nil {
+		instSamples = map[string]*clusterv1.InstanceSample{}
 		for _, in := range m.instances(ctx) {
 			if in.InstanceID == "" {
 				continue
@@ -113,11 +120,19 @@ func (m *metricsSampler) sample(ctx context.Context) {
 			rec("memory_bytes", scopeInstance, in.InstanceID, in.MemoryBytes)
 			rec("net_rx_bytes", scopeInstance, in.InstanceID, in.NetRxBytes)
 			rec("net_tx_bytes", scopeInstance, in.InstanceID, in.NetTxBytes)
+			instSamples[in.InstanceID] = &clusterv1.InstanceSample{
+				CpuPercent:  in.CPUPercent,
+				MemoryBytes: uint64(in.MemoryBytes),
+				NetRxBytes:  uint64(in.NetRxBytes),
+				NetTxBytes:  uint64(in.NetTxBytes),
+			}
 		}
 	}
 
+	var proxySamples map[string]*clusterv1.ProxySample
 	if m.proxy != nil {
-		for env, p := range m.proxy() {
+		proxySamples = m.proxy()
+		for env, p := range proxySamples {
 			if env == "" || p == nil {
 				continue
 			}
@@ -127,6 +142,10 @@ func (m *metricsSampler) sample(ctx context.Context) {
 			rec("error_rate", scopeEnv, env, p.GetErrorRate())
 			rec("inflight", scopeEnv, env, float64(p.GetInflight()))
 		}
+	}
+
+	if m.publish != nil {
+		m.publish(instSamples, proxySamples)
 	}
 }
 

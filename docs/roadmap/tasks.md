@@ -13,9 +13,9 @@ something runnable.
 > are done and **verified GREEN on a real 3-node Hetzner cluster**
 > (`test/cloud/ha_test.go`: quorum forms, leader-kill failover, dead node DOWN
 > in ~19s). Remaining T-55b polish (control mesh-hub for workers,
-> leadership-reactive device loops) is optional. **T-57/T-57c** (meshsock) and
-> **T-59/T-60** (ring TSDB metrics sampler + historical stats API/CLI) are done.
-> Next up: T-61 (autoscaler) or T-62 (volumes).
+> leadership-reactive device loops) is optional. **T-57/T-57c** (meshsock),
+> **T-59/T-60** (ring TSDB metrics sampler + historical stats API/CLI) and
+> **T-61** (CPU/mem/RPS autoscaler) are done. Next up: T-62 (volumes).
 
 ## What already exists (do not rebuild)
 
@@ -2146,8 +2146,33 @@ still green.
 **Tests:** unit — fan-out merge (sum vs avg per metric), sparkline renderer.
 **Acceptance:** `go test ./internal/daemon/api/ -run TestStatsHistory`
 
-### T-61 — Autoscaler
+### T-61 — Autoscaler  ✅ **DONE**
 Phase 6 · Depends: T-59, T-23 · Size: M
+**Landed:** `internal/daemon/scheduler/autoscaler.go` — a leader-gated 15s loop
+(`leaderrunner.Run`) that, per env with `Autoscale` targets and an active
+release (skipping envs a live deployment owns), reads the leader's livestate:
+per-instance cpu% and memory% (memory vs the env's `resources.memory_mb` limit)
+across the env's running assignments, and per-env RPS from proxy samples.
+`desired = ceil(running_replicas × observed / target)` per signal (rps reduces to
+`ceil(totalRPS/target)`), max across configured signals, clamped to
+`[max(min,1), max]`. Scale-up is immediate (gated only by the cooldown);
+scale-down fires only after the load holds below `0.8×target` for 5m (per-env
+`lowSince`) and a 3m post-change cooldown. Missing data (no running replicas /
+agent gap) or a configured signal with no samples → freeze (no write). Writes
+`effective_replicas` via `PutEnvironment` (re-read + clone) and emits an
+`autoscale.scaled` event; the scheduler (T-23) converges the count. Hold timers
+live in memory and reset each leadership term.
+**Wiring (needed for livestate to carry the data):** the agent heartbeat now
+attaches `Heartbeat.instances` (per-instance cpu/mem/net) and `Heartbeat.proxy`
+(per-env samples). To avoid double-draining the proxy RPS window, the metrics
+sampler (T-59) is the SOLE caller of `proxy.Snapshot()` and publishes the latest
+instance+proxy samples to the agent (`publishLive`); `heartbeat()` attaches the
+published copy. Autoscaler wired into `daemon.go` (`scheduler.NewAutoscaler`).
+**Tests:** `TestAutoscaler` — up on cpu spike, clamp to max, scale on rps,
+scale-down only after sustained-low + 5m hold, freeze on missing data, cooldown
+blocks a second change, no-config no-op (fake clock + scripted livestate).
+**Acceptance:** `go test ./internal/daemon/scheduler/ -run TestAutoscaler` ✅
+**Original spec below.**
 **Files:** `internal/daemon/scheduler/autoscaler.go`, `autoscaler_test.go`
 **Steps:**
 1. Leader loop (15s Clock): per env with autoscale targets: gather current

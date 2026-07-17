@@ -103,9 +103,11 @@ func (a *Agent) runSender(ctx context.Context, cancel context.CancelFunc, stream
 	}
 }
 
-// heartbeat builds a heartbeat message from the current host sample.
+// heartbeat builds a heartbeat message from the current host sample plus the
+// latest per-instance/per-env samples the metrics sampler published (T-61).
 func (a *Agent) heartbeat() *clusterv1.AgentMessage {
 	s := a.cfg.Sample()
+	instances, proxy := a.liveSamples()
 	return &clusterv1.AgentMessage{Body: &clusterv1.AgentMessage_Heartbeat{Heartbeat: &clusterv1.Heartbeat{
 		Time:             timestamppb.New(a.clock.Now()),
 		CpuPercent:       s.CPUPercent,
@@ -113,6 +115,8 @@ func (a *Agent) heartbeat() *clusterv1.AgentMessage {
 		MemoryTotalBytes: s.MemoryTotalBytes,
 		DiskUsedBytes:    s.DiskUsedBytes,
 		DiskTotalBytes:   s.DiskTotalBytes,
+		Instances:        instances,
+		Proxy:            proxy,
 	}}}
 }
 
