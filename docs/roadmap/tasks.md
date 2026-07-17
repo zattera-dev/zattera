@@ -16,8 +16,9 @@ something runnable.
 > leadership-reactive device loops) is optional. **T-57/T-57c** (meshsock),
 > **T-59/T-60** (ring TSDB metrics sampler + historical stats API/CLI),
 > **T-61** (CPU/mem/RPS autoscaler), **T-62** (node-pinned volumes + fencing
-> leases) and **T-63** (stateful stop-then-start deploys) are done. Next up:
-> T-64 (snapshot engine).
+> leases), **T-63** (stateful stop-then-start deploys) and **T-64** (content-
+> addressed snapshot engine) are done. Next up: T-65 (snapshot orchestration +
+> CLI).
 
 ## What already exists (do not rebuild)
 
@@ -2305,8 +2306,33 @@ STOPPING_OLD route.
 assignments for the volume at any step (assert continuously).
 **Acceptance:** `go test ./internal/daemon/scheduler/ -run TestStateful`
 
-### T-64 — Snapshot engine: tar + FastCDC + zstd + AES-GCM + S3
+### T-64 — Snapshot engine: tar + FastCDC + zstd + AES-GCM + S3  ✅ **DONE**
 Phase 6 · Depends: T-13 · Size: L
+**Landed:** the `internal/daemon/volumes` package — a content-addressed,
+deduplicated snapshot engine. `chunker.go` streams a deterministic tar of the
+volume path (sorted walk, zeroed atime/ctime, second-truncated mtime, uid/gid/
+mode preserved, PAX) so byte-identical trees tar identically; `snapshot.go`'s
+`Engine.Snapshot` feeds it through FastCDC (`jotfs/fastcdc-go`, ~1MB avg) and per
+chunk: `sha256(plaintext)` → HEAD-skip if `chunks/<hash>` exists (dedup) → zstd →
+AES-GCM (`crypto.go`, 32-byte data key, random 12-byte nonce as the object
+header — never hash-derived) → PUT; the ordered chunk list + tar total lands in
+an encrypted `manifests/<id>`. `Restore` streams chunks back through a tar
+extract (tar-slip guarded); `Prune` refcounts across all manifests and deletes
+only orphan chunks. `store.go` defines the `ObjectStore` interface + an in-memory
+store for tests; `s3.go` is the `minio-go/v7` `S3Store` (creds from BackupConfig;
+1MB objects, no multipart).
+**Dep note:** minio-go pinned to **v7.1.0** — v7.2.x pulls a newer
+`charmbracelet/x/ansi` that conflicts with the repo's pinned `x/cellbuf` and
+breaks the TUI build; 7.1.0 has the same S3 surface and coexists.
+**Tests:** `go test ./internal/daemon/volumes/` — crypto round trip (nonce
+uniqueness + wrong-key failure), deterministic-tar stability, snapshot→restore
+byte-identical, chunk stability + dedup (same data → same chunk set + no new
+objects; a 1-byte change → 1–2 new chunks), prune leaves shared chunks;
+integration `test/integration/TestSnapshotMinIO` (tag `integration`, real MinIO
+container, Docker-gated) does snapshot→restore→byte-identical + prune. Both green.
+**Acceptance:** `go test ./internal/daemon/volumes/` ✅;
+`go test -tags integration -run TestSnapshotMinIO ./test/integration/` ✅.
+**Original spec below.**
 **Files:** `internal/daemon/volumes/snapshot.go`, `chunker.go`, `s3.go`,
 tests with MinIO integration
 **Steps:**
