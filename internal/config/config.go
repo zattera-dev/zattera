@@ -37,7 +37,7 @@ type Config struct {
 	// env-var writes and backups disabled) until an operator runs
 	// `zattera unseal` or it recovers the key from a control peer. Default
 	// false, which favours a node coming back working after a reboot; see
-	// ADR-0005.
+	// ADR-0006.
 	SealedAtRest bool `toml:"sealed_at_rest"`
 
 	API      APIConfig      `toml:"api"`

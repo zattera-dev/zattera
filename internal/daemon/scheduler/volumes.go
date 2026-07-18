@@ -13,14 +13,13 @@ import (
 	"github.com/zattera-dev/zattera/internal/state"
 )
 
-const (
-	// leaseTTL is the fencing-lease validity window; generous vs clock skew.
-	leaseTTL = 60 * time.Second
-	// leaseRenew is the renewal cadence — well under leaseTTL so a healthy
-	// holder never lets its lease lapse. The scheduler's evalTick (15s) already
-	// beats this; the constant documents the intent (spec §9.1).
-	leaseRenew = 20 * time.Second
-)
+// leaseTTL is the fencing-lease validity window; generous vs clock skew.
+// Renewal is not on its own timer — reconcileLeases runs from the scheduler's
+// eval loop, so the real cadence is evalTick (15s), comfortably under the TTL
+// (spec §9.1). A separate leaseRenew constant used to sit here documenting a
+// 20s intent that nothing read; it was deleted rather than left to be mistaken
+// for the actual cadence.
+const leaseTTL = 60 * time.Second
 
 // ensureVolumes auto-creates the Volume objects a stateful service declares and
 // tracks NODE_LOST when a volume's pinned node goes down (spec §3.8). Runs

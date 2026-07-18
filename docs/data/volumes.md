@@ -43,8 +43,11 @@ zattera volume browse data                              # read-only file browser
 ```
 
 Deleting a volume removes its record and best-effort deletes the underlying
-docker volume on its node (a down node leaves it to be reaped later). Snapshots,
-scheduling and retention are covered in [Backup & disaster recovery](backup-restore).
+docker volume on its node. **If the node is down, the docker volume is left
+behind** — the record disappears, the disk usage does not, and nothing retries
+later. Check `docker volume ls` on that node when it comes back. Snapshots,
+scheduling and retention are covered in
+[Backup & disaster recovery](backup-restore).
 
 ## Browsing files
 
@@ -60,8 +63,9 @@ pg-data /data
 ```
 
 `d` downloads the selected file into your current directory. It works while the
-service is running — reading a live volume is the main reason to look at one —
-unlike snapshot, restore and delete, which refuse a mounted volume.
+service is running — reading a live volume is the main reason to look at one.
+Restore and delete, which write, refuse a mounted volume; snapshot does not (see
+below).
 
 **Read-only by design.** There are no delete or upload keys, and the API has no
 write path behind the browser. Two guards enforce the boundary on the node: a
@@ -79,13 +83,34 @@ corrupt the data. Two mechanisms guarantee it (spec §9.1):
 
 - **Pinning** — a stateful+volume service is only ever placed on the volume's
   node. If that node goes down the volume is marked `NODE_LOST` and the service
-  **stops** rather than moving; it resumes when the node returns (the data is on
-  that node's disk and cannot follow it).
+  is **not rescheduled elsewhere**: its assignment stays on the down node and
+  resumes when the node returns. The data is on that node's disk and cannot
+  follow it, so moving the service would mean running it against an empty
+  volume. Note the service is unavailable because the node is gone — Zattera
+  does not stop it, and nothing replaces it in the meantime.
 - **A fencing lease** — the leader grants the volume a 60-second lease naming the
-  node and instance allowed to mount it, renewed every ~20s. The agent **refuses
-  to start** a container unless the lease names it. During a network partition an
-  isolated node's lease can't be renewed, so no other node can acquire one until
-  it expires — closing any double-run window.
+  node and instance allowed to mount it, renewed on each scheduler pass (every
+  15s). The agent **refuses to start** a container unless the lease names both
+  that node and that assignment. During a network partition an isolated node's
+  lease can't be renewed, so no other node can acquire one until it expires —
+  closing any double-run window.
+
+## Snapshots run against a live volume
+
+`volume snapshot` (and the scheduled snapshots behind a
+[snapshot policy](backup-restore)) **do not** require the service to be stopped.
+They have to work this way: a policy that only fired against stopped services
+would never back up anything you actually run.
+
+That makes a snapshot **crash-consistent**, not application-consistent — the
+equivalent of pulling the power on the machine, not of a clean shutdown. Engines
+with a write-ahead log (Postgres, MySQL/InnoDB, SQLite in WAL mode) replay on
+next start and come up clean. Anything that buffers in memory without a journal
+may not. If your workload needs an application-consistent copy, quiesce or dump
+it first.
+
+Restore and delete are the operations that refuse a mounted volume — both write
+to it, so single-writer applies.
 
 ## Deploys are stop-then-start
 
@@ -108,10 +133,11 @@ running.
 
 `VolumeService` (`internal/daemon/api/volumes.go`) is the CRUD API, with file
 browsing in `volumefiles.go` proxying to the volume's node
-(`internal/daemon/agent/volumefiles.go`); the scheduler
-owns auto-create, pinning, `NODE_LOST` tracking and lease renewal
-(`internal/daemon/scheduler/volumes.go`); the agent enforces the lease before
-starting a container (`internal/daemon/agent/executor.go`); the deployment
-orchestrator runs the stop-then-start machine for stateful releases
+(`internal/daemon/agent/volumefiles.go`); the scheduler owns auto-create,
+`NODE_LOST` tracking and lease renewal
+(`internal/daemon/scheduler/volumes.go`), while the pinning itself lives in the
+placer (`internal/daemon/scheduler/placement.go`); the agent enforces the lease
+before starting a container (`internal/daemon/agent/executor.go`); the
+deployment orchestrator runs the stop-then-start machine for stateful releases
 (`internal/daemon/scheduler/stateful.go`). Snapshots back up to S3 — see
 [Backup & disaster recovery](backup-restore).

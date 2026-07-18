@@ -192,7 +192,9 @@ func (s *Scheduler) evaluateEnv(ctx context.Context, st *state.Store, env *zatte
 			}
 			if isStateful(rel) {
 				// Hard down + stateful: leave in place; the volume is pinned to
-				// the down node. TODO(T-62): mark the volume NODE_LOST.
+				// the down node and cannot follow it. The assignment stays
+				// desired=RUN — nothing stops it, it is simply unreachable —
+				// and ensureVolumes marks the volume NODE_LOST separately.
 				good = append(good, a)
 				continue
 			}

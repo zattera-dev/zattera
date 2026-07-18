@@ -4352,6 +4352,45 @@ corrupt/missing file), `api/unseal_test.go` KeyService authz, plus a live
 dev-cluster run of all three recovery paths.
 **Acceptance:** `go test ./internal/daemon/ ./internal/daemon/api/`
 
+### T-113 — Deleting a volume on a down node leaks its disk
+
+Phase 9 · Depends: T-62 · Size: S
+**Problem:** `DeleteVolume` (`internal/daemon/api/volumes.go`) removes the
+Volume record and best-effort deletes the underlying docker volume with a 3s
+timeout. When the node is down that call fails, the code logs "orphaned on
+node", and **nothing ever retries** — the record is gone, so no reconciler even
+knows the docker volume should not exist. The disk stays used until an operator
+runs `docker volume ls` on that node by hand. `reconcileOrphans`
+(`scheduler/teardown.go`) reaps assignments, not docker volumes. Found auditing
+`docs/data/volumes.md`, which claimed a down node "leaves it to be reaped
+later" — describing a reaper that does not exist. The doc now states the real
+behaviour; this task makes the behaviour match what a user expects.
+**Files:** `internal/daemon/api/volumes.go`,
+`internal/daemon/scheduler/teardown.go` (or a new reaper),
+`api/proto/zattera/v1/*.proto` (tombstone record), `internal/state/`
+**Steps:**
+
+1. On a failed docker-volume delete, record a tombstone in replicated state
+   (node id + docker volume name + deleted-at) instead of only logging. The
+   Volume record must still disappear — users should not see a deleted volume
+   linger — so the tombstone is a separate, small kind.
+2. A leader-gated reaper retries tombstones for nodes that are ALIVE again, and
+   drops each one once the node confirms the volume is gone (or reports it was
+   never there).
+3. Bound it: cap tombstone count and age so a permanently dead node cannot grow
+   replicated state without limit. Expiring a tombstone should log loudly —
+   that is genuine leaked disk, and silence is how it stays leaked.
+
+**Gotchas:** the node may return with the docker volume already removed by an
+operator; treat "not found" as success, not an error to retry forever. A node
+that is decommissioned entirely will never confirm — that is what the age cap
+is for. Do not block `DeleteVolume` on the node coming back: the API must stay
+responsive while a node is down, which is why this is asynchronous.
+**Tests:** delete against a down node writes a tombstone and still removes the
+Volume record; the reaper retries and clears it once the node is ALIVE; a
+not-found delete clears the tombstone; tombstones expire and log.
+**Acceptance:** `go test ./internal/daemon/api/ ./internal/daemon/scheduler/ -run Volume`
+
 ---
 
 # Backlog (M4/M5 — do not implement now)
@@ -4598,5 +4637,5 @@ P6: T-55(17,08)→T-56 · T-57(20)→T-58 · T-59(13)→T-60(41)/T-61(23) ·
 P7: T-69(61,42)→T-70→T-71 · T-72(45)→T-73 · T-74(59,07) · T-75(37,45) ·
     T-76 · T-77(65) · T-78 · T-79(54) · T-80(all)
 P8: T-81(12)→T-82→T-83 · T-84(83,17,29)→T-85(84) · T-86(84,85)
-P9: T-91(53,40) · T-92(66,76) · T-93(14) · T-94(19) · T-95(93,94,54) · T-96(12) · T-97(87,88) · T-98(63,97) · T-99(31) · T-100(35,95) · T-101(32,55)→T-102(101,64) · T-103(12) · T-104(44) · T-105(44) · T-106(51) · T-107(19) · T-108(11) · T-109(74)→T-110(109,14) · T-111(03)→T-112(111)
+P9: T-91(53,40) · T-92(66,76) · T-93(14) · T-94(19) · T-95(93,94,54) · T-96(12) · T-97(87,88) · T-98(63,97) · T-99(31) · T-100(35,95) · T-101(32,55)→T-102(101,64) · T-103(12) · T-104(44) · T-105(44) · T-106(51) · T-107(19) · T-108(11) · T-109(74)→T-110(109,14) · T-111(03)→T-112(111) · T-113(62)
 ```

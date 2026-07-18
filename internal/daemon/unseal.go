@@ -27,7 +27,7 @@ import (
 // Deliberately plaintext at 0600 rather than wrapped by another local key:
 // anything that could unwrap it would have to live on the same disk, so
 // wrapping would buy obscurity, not security, and would misrepresent the
-// guarantee. See ADR-0005.
+// guarantee. See ADR-0006.
 const dataKeyFile = "node/data.key"
 
 // peerUnsealTimeout bounds the whole peer-fetch attempt at startup. Serving

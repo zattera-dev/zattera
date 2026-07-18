@@ -93,7 +93,7 @@ func TestVolumeLease(t *testing.T) {
 		}
 
 		// Renew: advance the clock, re-evaluate, expiry must move forward.
-		clk.Advance(leaseRenew)
+		clk.Advance(evalTick)
 		mustEval(t, s)
 		v2 := theVolume(t, st)
 		newWant := clk.Now().Add(leaseTTL)
@@ -119,7 +119,7 @@ func TestVolumeLease(t *testing.T) {
 		down.Status = zatterav1.NodeStatus_NODE_STATUS_DOWN
 		st.PutNode(down)
 
-		clk.Advance(leaseRenew)
+		clk.Advance(evalTick)
 		mustEval(t, s)
 
 		v = theVolume(t, st)
