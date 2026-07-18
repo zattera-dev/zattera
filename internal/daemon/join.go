@@ -27,7 +27,6 @@ import (
 	"github.com/zattera-dev/zattera/internal/config"
 	"github.com/zattera-dev/zattera/internal/daemon/mesh"
 	"github.com/zattera-dev/zattera/internal/daemon/nodeinfo"
-	"github.com/zattera-dev/zattera/internal/pkgutil/platform"
 	"github.com/zattera-dev/zattera/internal/pkgutil/version"
 )
 
@@ -122,7 +121,7 @@ func runJoin(ctx context.Context, cfg config.Config, log *slog.Logger) (*joinRes
 		NodeName:            cfg.NodeName,
 		ExistingNodeId:      readNodeID(cfg.DataDir),
 		CsrPem:              csrPEM,
-		OsArch:              platform.Local(),
+		OsArch:              nodeOsArch(ctx, log), // the engine's platform, not the binary's (T-97)
 		BinaryVersion:       version.Version,
 		Capacity:            &zatterav1.ResourceLimits{CpuMillis: capacity.CPUMillis, MemoryMb: capacity.MemoryMB},
 		CapacityDiskMb:      capacity.DiskMB,

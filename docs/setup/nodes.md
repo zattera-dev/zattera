@@ -75,7 +75,7 @@ Node **labels** (shown in `nodes ls`) are matched by apps through `[env.<name>.p
 
 | Label | Value | Meaning |
 | ----- | ----- | ------- |
-| `zattera.dev/os-arch` | e.g. `linux/arm64` | The node's platform; how multi-arch images land on the right hardware |
+| `zattera.dev/os-arch` | e.g. `linux/arm64` | The platform the node's **container engine** executes (not the daemon binary's — on macOS dev nodes those differ); how multi-arch images land on the right hardware |
 | `builder` | `true` | Set on every node with the `worker` role — the build dispatcher places builds here |
 
 Anything else is yours to set:

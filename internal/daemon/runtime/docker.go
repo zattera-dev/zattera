@@ -439,6 +439,35 @@ func (d *Docker) VolumeHostPath(ctx context.Context, name string) (string, error
 	return v.Mountpoint, nil
 }
 
+// Platform returns the engine's execution platform as a raw "os/arch" string
+// (e.g. "linux/aarch64" — Docker reports uname-style arch, so callers must
+// normalize). This is what containers actually run on, which is NOT the
+// daemon binary's platform on macOS/Windows: there the daemon is darwin/
+// windows while the engine runs a linux VM (T-97).
+func (d *Docker) Platform(ctx context.Context) (string, error) {
+	info, err := d.cli.Info(ctx)
+	if err != nil {
+		return "", normalizeErr("engine info", err)
+	}
+	if info.OSType == "" || info.Architecture == "" {
+		return "", fmt.Errorf("runtime: engine info reported empty platform (os=%q arch=%q)", info.OSType, info.Architecture)
+	}
+	return info.OSType + "/" + info.Architecture, nil
+}
+
+// EnginePlatform queries the local engine's platform with a short-lived
+// client. It exists because the node registers itself (and joins) before the
+// long-lived runtime is constructed, and the node's advertised os-arch must
+// describe the engine, not the daemon binary (T-97).
+func EnginePlatform(ctx context.Context) (string, error) {
+	d, err := NewDocker()
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = d.cli.Close() }()
+	return d.Platform(ctx)
+}
+
 func (d *Docker) inspectNetwork(ctx context.Context, name string) (NetworkInfo, error) {
 	n, err := d.cli.NetworkInspect(ctx, name, networktypes.InspectOptions{})
 	if err != nil {

@@ -3497,6 +3497,69 @@ placement regression: a node whose runtime is `linux/arm64` accepts a
 `zt deploy --image nginx:alpine --prod` succeeding against `zattera server
 --dev` on macOS.
 
+**DONE** — `runtime.EnginePlatform` / `(*Docker).Platform` query the engine's
+`Info` (`OSType/Architecture`); `nodeOsArch` (internal/daemon/osarch.go)
+normalizes through `platform.Normalize`, falls back to `platform.Local()` with
+a WARN when the engine is unreachable or unparseable, and logs the
+darwin-vs-linux divergence at INFO. Wired into both `registerLocalNode` and the
+join request. Verified on macOS: the node now advertises
+`zattera.dev/os-arch=linux/arm64` and `zt deploy --image nginx:alpine --prod`
+releases healthy on a `--dev` node (it failed placement before).
+**Beyond the plan:** re-registration preservation. `PutNode` is a wholesale
+replace and `registerLocalNode` re-runs on every daemon restart, so refreshing
+os-arch idempotently (the task's gotcha) would have kept wiping operator state:
+custom labels (T-96) and the cordon flag (`Schedulable: true` unconditional).
+Re-register now carries over non-self-asserted labels and the schedulable flag
+while refreshing os-arch/capacity/version.
+**Found while verifying (filed, not fixed):** T-98 — the health monitor
+resolves its probe target once at registration and never re-inspects, so a
+stateful second deploy on macOS deterministically times out (`could not
+resolve a probe target; skipping` every tick). The failure path itself behaved
+as documented: old instance restarted, `deploy.rolled_back` emitted.
+**Tests:** `internal/daemon/osarch_test.go` (aarch64 normalization,
+unreachable fallback + WARN, unparseable fallback + WARN, placement regression
+with engine arch vs binary arch); `internal/daemon/register_test.go` (os-arch
+field + label from the engine; re-register preserves custom labels, cordon and
+created-at while refreshing stale os-arch).
+
+---
+
+### T-98 — Health monitor never re-resolves a probe target (stateful dev deploys always fail)
+
+Phase 9 · Depends: T-63, T-97 · Size: S
+**Problem:** on macOS (`useHostPort`, `health.go`) the health monitor resolves
+its probe target from the container's published host port ONCE, at monitor
+registration (`health.go` ~260–293). If the inspect happens before Docker has
+reported the dynamic binding (`HostPort: 0` until after Start, `executor.go:417`),
+resolution fails and the monitor logs `health: could not resolve a probe
+target; skipping` **on every tick forever** — it never re-inspects. The
+instance stays RUNNING, never HEALTHY, and the deploy times out. Reproduced
+deterministically (2/2) with a stateful `redis` second deploy on a `--dev`
+macOS node after T-97: `deploy.maintenance_start` fires, green starts and its
+port IS published (visible in `docker ps`), but the monitor skips 150+ probes
+and `statefulHealth` fails the deploy — which then correctly restarts the old
+instance (`deploy.rolled_back`). First deploys are less exposed (slower pull
+widens the gap) but the race is generic; Linux is unaffected only because it
+probes the container IP, which exists from creation.
+**Files:** `internal/daemon/agent/health.go`, `internal/daemon/agent/health_test.go`
+**Steps:**
+
+1. Make target resolution retryable: when `probeTarget` returns ok=false,
+   don't bake the failure in — re-inspect the container on each probe tick
+   (or until first success) instead of resolving once at registration.
+2. Keep the WARN, but log it once per state change, not per tick (152
+   identical lines in one deploy is noise that buries the signal).
+3. Regression test with a fake runtime whose ContainerState reports no port
+   binding on the first inspect and the binding on the second: the monitor
+   must go HEALTHY, not skip forever.
+
+**Gotchas:** don't re-inspect on every tick after a successful resolve (extra
+Docker load for nothing); the EXEC probe path doesn't need a target — leave it
+alone. The monitor's mutex is held around registration (`m.mu`), keep the
+re-resolve outside it.
+**Acceptance:** `go test ./internal/daemon/agent/ -run TestHealth`, plus a
+stateful image bump on a macOS `--dev` node reaching `deploy.maintenance_end`.
+
 ---
 
 # Backlog (M4/M5 — do not implement now)
@@ -3743,5 +3806,5 @@ P6: T-55(17,08)→T-56 · T-57(20)→T-58 · T-59(13)→T-60(41)/T-61(23) ·
 P7: T-69(61,42)→T-70→T-71 · T-72(45)→T-73 · T-74(59,07) · T-75(37,45) ·
     T-76 · T-77(65) · T-78 · T-79(54) · T-80(all)
 P8: T-81(12)→T-82→T-83 · T-84(83,17,29)→T-85(84) · T-86(84,85)
-P9: T-91(53,40) · T-92(66,76) · T-93(14) · T-94(19) · T-95(93,94,54) · T-96(12) · T-97(87,88)
+P9: T-91(53,40) · T-92(66,76) · T-93(14) · T-94(19) · T-95(93,94,54) · T-96(12) · T-97(87,88) · T-98(63,97)
 ```

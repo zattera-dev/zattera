@@ -53,7 +53,6 @@ import (
 	"github.com/zattera-dev/zattera/internal/daemon/upgrade"
 	"github.com/zattera-dev/zattera/internal/pkgutil/clock"
 	"github.com/zattera-dev/zattera/internal/pkgutil/ids"
-	"github.com/zattera-dev/zattera/internal/pkgutil/platform"
 	"github.com/zattera-dev/zattera/internal/pkgutil/version"
 	"github.com/zattera-dev/zattera/internal/state"
 )
@@ -744,10 +743,14 @@ func registerLocalNode(ctx context.Context, rs *raftstore.Store, cfg config.Conf
 		roles = append(roles, zatterav1.NodeRole_NODE_ROLE_WORKER)
 	}
 	now := timestamppb.Now()
+	// The node's os-arch is the CONTAINER engine's platform, not the daemon
+	// binary's — on macOS the daemon is darwin/* while Docker runs linux/*,
+	// and placement (T-88) matches against what containers can execute (T-97).
+	osArch := nodeOsArch(ctx, log)
 	// Worker nodes can build (T-54): label them builder=true so the dispatcher
 	// can place builds. Single-node/dev thus builds locally. The os-arch label
 	// mirrors the authoritative OsArch field for label-based constraints.
-	labels := map[string]string{"zattera.dev/os-arch": platform.Local()}
+	labels := map[string]string{"zattera.dev/os-arch": osArch}
 	if cfg.HasRole(config.RoleWorker) {
 		labels["builder"] = "true"
 	}
@@ -760,12 +763,22 @@ func registerLocalNode(ctx context.Context, rs *raftstore.Store, cfg config.Conf
 		Schedulable:    true,
 		Capacity:       &zatterav1.ResourceLimits{CpuMillis: capacity.CPUMillis, MemoryMb: capacity.MemoryMB},
 		CapacityDiskMb: capacity.DiskMB,
-		OsArch:         platform.Local(),
+		OsArch:         osArch,
 		BinaryVersion:  version.Version,
 	}
-	// Preserve creation time if already registered.
+	// Re-registration must refresh node-asserted facts (os-arch, capacity,
+	// version) WITHOUT destroying operator state: PutNode is a wholesale
+	// replace, so carry over creation time, custom labels (zt nodes label,
+	// T-96) and the schedulable flag — otherwise a daemon restart would wipe
+	// placement labels and silently uncordon a cordoned node.
 	if existing, ok := rs.State().Node(nodeID); ok {
 		node.GetMeta().CreatedAt = existing.GetMeta().GetCreatedAt()
+		node.Schedulable = existing.GetSchedulable()
+		for k, v := range existing.GetLabels() {
+			if _, selfAsserted := labels[k]; !selfAsserted {
+				node.Labels[k] = v
+			}
+		}
 	}
 	return rs.Apply(ctx, &clusterv1.Command{
 		RequestId: ids.New(),
