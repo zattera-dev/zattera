@@ -31,26 +31,27 @@ That puts Zattera in a specific sweet spot: **you've outgrown a single box, but 
 - **Choose Kubernetes** if you need arbitrary extensibility, an ecosystem of operators, multi-tenant isolation at scale, or you already run it well.
 - **Choose Zattera** if you want that class of capability without the platform underneath it — a handful of commands instead of hundreds of config files.
 
-## From zero to deployed in four commands
+## From zero to deployed in four steps
 
 ::: steps
 
 1. **Start the cluster** — on your first server. It asks for a domain (e.g. `mycluster.example.com`) and prints your login + join commands.
 
    ```bash
-   curl -fsSL https://get.zattera.dev | sh
+   curl -fsSL https://get.zattera.dev | sudo sh
    sudo zattera cluster init
    ```
 
 2. **Join more machines** — anywhere in the world; NAT'd home servers included. The previous command prints this line for you.
 
    ```bash
-   curl -fsSL https://get.zattera.dev | sh && sudo zattera cluster join <control-ip>:8443 --token <JOIN_TOKEN>
+   curl -fsSL https://get.zattera.dev | sudo sh && sudo zattera cluster join <control-ip>:8443 --token <JOIN_TOKEN>
    ```
 
-3. **Log in from your laptop** — the CLI is a pure API client.
+3. **Log in from your laptop** — same installer (macOS and Linux; it drops the CLI-only binary on macOS). The CLI is a pure API client.
 
    ```bash
+   curl -fsSL https://get.zattera.dev | sudo sh
    zt login --server https://<control-ip>:8443 --ca-pin <FINGERPRINT> --token <ADMIN_TOKEN> --context prod
    ```
 
