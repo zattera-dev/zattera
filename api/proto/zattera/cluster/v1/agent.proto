@@ -331,12 +331,14 @@ message VolumeOpProgress {
 }
 
 message AgentListFilesRequest {
-  string volume_docker_name = 1;
-  string path = 2;
+  string environment_id = 1;
+  string volume_name = 2; // logical name; the agent derives the docker volume name
+  string path = 3;
 }
 
 message AgentListFilesResponse {
   repeated AgentFileInfo files = 1;
+  bool truncated = 2; // directory had more entries than the cap
 }
 
 message AgentFileInfo {
@@ -348,8 +350,9 @@ message AgentFileInfo {
 }
 
 message AgentReadFileRequest {
-  string volume_docker_name = 1;
-  string path = 2;
+  string environment_id = 1;
+  string volume_name = 2; // logical name; the agent derives the docker volume name
+  string path = 3;
 }
 
 message AgentWriteFileChunk {

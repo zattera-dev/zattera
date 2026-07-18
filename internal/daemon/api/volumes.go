@@ -28,14 +28,15 @@ type VolumeAgentDialer interface {
 	RemoveVolume(ctx context.Context, node *zatterav1.Node, envID, volumeName string) error
 }
 
-// VolumeServer implements the CRUD subset of VolumeService (T-62). Snapshot,
-// restore and file operations land in later tasks (T-64/T-65/T-77).
+// VolumeServer implements VolumeService: CRUD (T-62), snapshot/restore
+// (T-64/T-65) and read-only file browsing (T-77).
 type VolumeServer struct {
 	zatterav1.UnimplementedVolumeServiceServer
 	store *state.Store
 	raft  Applier
 	clock clock.Clock
 	dial  VolumeAgentDialer
+	files VolumeFileDialer    // nil leaves ListFiles/ReadFile Unimplemented (T-77)
 	snap  *SnapshotDispatcher // nil until the cluster is unsealed with a backup config
 	log   *slog.Logger
 }

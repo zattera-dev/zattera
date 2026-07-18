@@ -626,6 +626,9 @@ message ListFilesRequest {
 
 message ListFilesResponse {
   repeated FileInfo files = 1;
+  // True when the directory held more entries than the server will return.
+  // There is no pagination: narrow the path instead.
+  bool truncated = 2;
 }
 
 message FileInfo {

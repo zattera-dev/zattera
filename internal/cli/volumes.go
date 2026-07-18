@@ -15,7 +15,8 @@ func newVolumesCmd() *cobra.Command {
 		Short:   "Manage node-pinned persistent volumes",
 	}
 	cmd.AddCommand(newVolumeLsCmd(), newVolumeCreateCmd(), newVolumeRmCmd(),
-		newVolumeSnapshotCmd(), newVolumeSnapshotsCmd(), newVolumeRestoreCmd())
+		newVolumeSnapshotCmd(), newVolumeSnapshotsCmd(), newVolumeRestoreCmd(),
+		newVolumeBrowseCmd())
 	return cmd
 }
 

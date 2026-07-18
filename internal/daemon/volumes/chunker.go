@@ -154,10 +154,15 @@ func restoreAttrs(target string, hdr *tar.Header) {
 }
 
 // safeJoin joins base and name, rejecting paths that escape base (tar-slip).
-func safeJoin(base, name string) (string, error) {
+func safeJoin(base, name string) (string, error) { return SafeJoin(base, name) }
+
+// SafeJoin joins base and name, rejecting paths that escape base. Used for
+// tar-slip protection on restore and for volume file browsing (T-77), where
+// the path comes straight from an API caller.
+func SafeJoin(base, name string) (string, error) {
 	clean := filepath.Join(base, filepath.Clean("/"+name))
 	if clean != base && !isSubpath(base, clean) {
-		return "", fmt.Errorf("volumes: unsafe tar path %q", name)
+		return "", fmt.Errorf("volumes: unsafe path %q", name)
 	}
 	return clean, nil
 }

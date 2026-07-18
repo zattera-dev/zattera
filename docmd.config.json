@@ -85,7 +85,7 @@
       "title": "Data",
       "icon": "database",
       "children": [
-        { "title": "Volumes · WIP", "path": "/data/volumes/", "icon": "hard-drive" },
+        { "title": "Volumes", "path": "/data/volumes/", "icon": "hard-drive" },
         { "title": "Backup & DR · WIP", "path": "/data/backup-restore/", "icon": "life-buoy" }
       ]
     },

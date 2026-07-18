@@ -10,8 +10,9 @@ volume — honest single-writer semantics, no fake distributed storage. A volume
 lives on exactly one node; the service that mounts it is pinned to that node.
 
 Volume lifecycle, pinning, the single-writer fencing lease, the `zattera volume`
-CLI and [snapshots to S3](backup-restore) are all available. Browsing a volume's
-files (`volume browse`/`cp`) is still on the [roadmap](../roadmap/tasks).
+CLI, [snapshots to S3](backup-restore) and read-only file browsing are all
+available. Writing into a volume from your machine (`volume cp`) is still on the
+[roadmap](../roadmap/tasks).
 
 ## Declare a volume
 
@@ -38,11 +39,38 @@ zattera volume rm <id>                                  # refused while the serv
 zattera volume snapshot <id>                            # snapshot now (see Backup & DR)
 zattera volume snapshots <id>                           # list snapshots
 zattera volume restore <id> --snapshot <snap-id>        # service must be stopped
+zattera volume browse data                              # read-only file browser
 ```
 
 Deleting a volume removes its record and best-effort deletes the underlying
 docker volume on its node (a down node leaves it to be reaped later). Snapshots,
 scheduling and retention are covered in [Backup & disaster recovery](backup-restore).
+
+## Browsing files
+
+`zattera volume browse <name-or-id>` opens a read-only file browser against the
+volume's node:
+
+```
+pg-data /data
+  base/                                       -  2026-07-18 09:12
+> dump.sql                              2.0KB    2026-07-18 09:14
+  postgresql.conf                        29.4KB  2026-07-14 11:02
+↑/↓ move · enter open · backspace up · d download · r refresh · q quit
+```
+
+`d` downloads the selected file into your current directory. It works while the
+service is running — reading a live volume is the main reason to look at one —
+unlike snapshot, restore and delete, which refuse a mounted volume.
+
+**Read-only by design.** There are no delete or upload keys, and the API has no
+write path behind the browser. Two guards enforce the boundary on the node: a
+path that escapes the volume lexically (`../../etc/shadow`) is rejected, and so
+is a symlink *inside* the volume that points outside it — volume contents are
+written by your workload, so that link may not be yours.
+
+A directory with more than 5 000 entries is truncated, with a warning line
+saying so. There is no pagination; narrow the path instead.
 
 ## Single-writer fencing
 
@@ -78,7 +106,9 @@ running.
 
 ## Under the hood
 
-`VolumeService` (`internal/daemon/api/volumes.go`) is the CRUD API; the scheduler
+`VolumeService` (`internal/daemon/api/volumes.go`) is the CRUD API, with file
+browsing in `volumefiles.go` proxying to the volume's node
+(`internal/daemon/agent/volumefiles.go`); the scheduler
 owns auto-create, pinning, `NODE_LOST` tracking and lease renewal
 (`internal/daemon/scheduler/volumes.go`); the agent enforces the lease before
 starting a container (`internal/daemon/agent/executor.go`); the deployment

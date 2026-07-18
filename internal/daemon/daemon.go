@@ -416,6 +416,7 @@ func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store
 	// unsealed data key + backup config; a follower/sealed node serves volume
 	// CRUD but returns FailedPrecondition for snapshot ops.
 	volumeSrv := api.NewVolumeServer(st, rs, api.GRPCVolumeAgentDialer{Connect: agentLocalConnect}, clk, log)
+	volumeSrv.SetFileDialer(api.GRPCVolumeFileDialer{Connect: agentLocalConnect})
 	var snapDispatcher *api.SnapshotDispatcher
 	var backupSrv zatterav1.BackupServiceServer // nil interface on a sealed node
 	if sealer != nil && keyring != nil {
