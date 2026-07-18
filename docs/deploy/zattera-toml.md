@@ -109,7 +109,7 @@ If you declare nothing and the app has an HTTP port, you get the HTTP `/healthz`
 | `max_concurrency` | — | Serverless mode: scale on in-flight requests per replica — [Scale-to-zero](../scaling/scale-to-zero#serverless-concurrency-mode) |
 | `[env.<name>.resources]` | — | `cpu_millis`, `memory_mb` reservations (used for placement) |
 | `[env.<name>.autoscale]` | — | [Autoscaling](../scaling/autoscaling) targets: `target_cpu_percent`, `target_memory_percent`, `target_rps_per_replica` |
-| `[env.<name>.placement]` | — | Node label constraints (string map) |
+| `[env.<name>.placement]` | — | Node label constraints (string map); set labels with [`zt nodes label`](../setup/nodes#labels-and-placement) |
 
 #### `[[env.<name>.ports]]`
 

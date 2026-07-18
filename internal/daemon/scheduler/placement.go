@@ -3,6 +3,7 @@ package scheduler
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 
 	zatterav1 "github.com/zattera-dev/zattera/api/gen/zattera/v1"
@@ -52,6 +53,7 @@ func Place(st *state.Store, rel *zatterav1.Release, envID string, n int, exclude
 	// tightening, never a new hard requirement.
 	var cands []*zatterav1.Node
 	archRejected := false
+	labelRejected := false
 	for _, node := range st.ListNodes() {
 		id := node.GetMeta().GetId()
 		if exclude[id] {
@@ -65,6 +67,7 @@ func Place(st *state.Store, rel *zatterav1.Release, envID string, n int, exclude
 			continue
 		}
 		if !labelsMatch(node.GetLabels(), spec.GetPlacementConstraints()) {
+			labelRejected = true
 			continue
 		}
 		if pinned != "" && id != pinned {
@@ -74,6 +77,13 @@ func Place(st *state.Store, rel *zatterav1.Release, envID string, n int, exclude
 	}
 	if len(cands) == 0 && archRejected {
 		return nil, fmt.Errorf("placement: no node with a supported architecture (need one of %s) for env %s", strings.Join(platforms, ", "), envID)
+	}
+	// An unsatisfiable placement constraint fails the same way an unsatisfiable
+	// arch does. Returning no candidates instead would park the replicas with no
+	// error anywhere, which reads as "deploying" forever — the failure mode is a
+	// typo in a label, and it must be visible.
+	if len(cands) == 0 && labelRejected {
+		return nil, fmt.Errorf("placement: no node matches constraints %s for env %s", formatConstraints(spec.GetPlacementConstraints()), envID)
 	}
 
 	// Base spread counts: replicas of THIS env per node and per region.
@@ -228,3 +238,13 @@ func freeMemory(cap *zatterav1.ResourceLimits, cur resources) int64 {
 }
 
 func regionOf(node *zatterav1.Node) string { return node.GetLabels()["region"] }
+
+// formatConstraints renders a label map deterministically for error messages.
+func formatConstraints(c map[string]string) string {
+	pairs := make([]string, 0, len(c))
+	for k, v := range c {
+		pairs = append(pairs, k+"="+v)
+	}
+	sort.Strings(pairs)
+	return strings.Join(pairs, ",")
+}

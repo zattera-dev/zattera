@@ -3,6 +3,7 @@ package scheduler
 import (
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 
 	zatterav1 "github.com/zattera-dev/zattera/api/gen/zattera/v1"
@@ -155,5 +156,44 @@ func pnode(id, region string, cpu, mem uint32) *zatterav1.Node {
 		Schedulable: true,
 		Labels:      labels,
 		Capacity:    &zatterav1.ResourceLimits{CpuMillis: cpu, MemoryMb: mem},
+	}
+}
+
+// TestUnsatisfiablePlacementConstraintErrors: a constraint no node matches used
+// to return zero candidates and no error, which parks the replicas silently and
+// looks identical to "still deploying". It must fail like an arch mismatch does.
+func TestUnsatisfiablePlacementConstraintErrors(t *testing.T) {
+	st := state.New()
+	st.PutNode(pnode("n1", "eu", 1000, 1024))
+	st.PutNode(pnode("n2", "us", 1000, 1024))
+	spec := &zatterav1.ServiceSpec{PlacementConstraints: map[string]string{"region": "moon"}}
+
+	got, err := Place(st, specRel(spec), "env1", 1, nil)
+	if err == nil {
+		t.Fatalf("want an error for an unsatisfiable constraint, got placements %v", got)
+	}
+	if !strings.Contains(err.Error(), "region=moon") {
+		t.Errorf("error should name the constraint, got %q", err)
+	}
+}
+
+// TestPlacementConstraintSatisfiedByFullNode: a constraint that DOES match a
+// node still fails when nothing fits, but must not be reported as a constraint
+// mismatch — "no node matches region=eu" would send an operator hunting for a
+// typo when the real answer is that the cluster is out of room.
+func TestPlacementConstraintSatisfiedByFullNode(t *testing.T) {
+	st := state.New()
+	st.PutNode(pnode("n1", "eu", 1, 1))
+	spec := &zatterav1.ServiceSpec{
+		PlacementConstraints: map[string]string{"region": "eu"},
+		Resources:            &zatterav1.ResourceLimits{CpuMillis: 4000, MemoryMb: 4096},
+	}
+
+	_, err := Place(st, specRel(spec), "env1", 1, nil)
+	if err == nil {
+		t.Fatal("want an error when nothing fits")
+	}
+	if strings.Contains(err.Error(), "no node matches") {
+		t.Errorf("capacity shortfall must not read as a constraint mismatch: %q", err)
 	}
 }

@@ -21,8 +21,126 @@ func newNodesCmd() *cobra.Command {
 		Short:   "Inspect cluster nodes and manage join tokens",
 	}
 	cmd.AddCommand(newNodesLsCmd(), newJoinTokenCmd(), newNodesDrainCmd(), newNodesRmCmd(),
-		newNodeCordonCmd(false), newNodeCordonCmd(true))
+		newNodeCordonCmd(false), newNodeCordonCmd(true), newNodesLabelCmd())
 	return cmd
+}
+
+// reservedLabelPrefix marks labels a node asserts about itself (os-arch). They
+// describe hardware, not intent: letting an operator overwrite them would make
+// the scheduler place images on machines that cannot run them.
+const reservedLabelPrefix = "zattera.dev/"
+
+func newNodesLabelCmd() *cobra.Command {
+	var overwrite bool
+	cmd := &cobra.Command{
+		Use:   "label <name> KEY=VALUE|KEY- [KEY=VALUE|KEY- ...]",
+		Short: "Set or remove node labels (matched by placement constraints)",
+		Long: "Labels are matched by [env.<name>.placement] in zattera.toml, and the\n" +
+			"\"region\" label additionally spreads replicas across regions.\n\n" +
+			"Labels merge by default: existing keys are kept, and changing one requires\n" +
+			"--overwrite so a typo cannot silently repoint placement. KEY- removes a key.",
+		Args: cobra.MinimumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			sets, removes, err := parseLabelArgs(args[1:])
+			if err != nil {
+				return err
+			}
+			client, _, err := clientFromContext()
+			if err != nil {
+				return err
+			}
+			defer func() { _ = client.Close() }()
+			ctx, cancel := cmdContext(cmd)
+			defer cancel()
+
+			id, err := resolveNodeID(ctx, client, args[0])
+			if err != nil {
+				return err
+			}
+			node, err := client.Nodes.GetNode(ctx, &zatterav1.GetNodeRequest{NodeId: id})
+			if err != nil {
+				return apiError(err)
+			}
+			labels, err := mergeLabels(node.GetLabels(), sets, removes, overwrite)
+			if err != nil {
+				return err
+			}
+
+			// SetNodeLabels writes Schedulable unconditionally, so echoing the
+			// node's current value is what keeps a labeling call from silently
+			// uncordoning a cordoned node.
+			updated, err := client.Nodes.SetNodeLabels(ctx, &zatterav1.SetNodeLabelsRequest{
+				NodeId:      id,
+				Labels:      labels,
+				Schedulable: node.GetSchedulable(),
+			})
+			if err != nil {
+				return apiError(err)
+			}
+			p := printerFor(cmd)
+			if p.JSON {
+				return p.EmitJSON(updated.GetLabels())
+			}
+			p.Successf("node %s labels updated", args[0])
+			p.Infof("%s", nodeLabels(updated.GetLabels()))
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "allow changing labels that already exist")
+	return cmd
+}
+
+// parseLabelArgs splits "key=value" (set) from "key-" (remove) arguments.
+func parseLabelArgs(args []string) (sets map[string]string, removes []string, err error) {
+	sets = map[string]string{}
+	seen := map[string]bool{}
+	for _, a := range args {
+		var key string
+		switch {
+		case strings.HasSuffix(a, "-") && !strings.Contains(a, "="):
+			key = strings.TrimSuffix(a, "-")
+			removes = append(removes, key)
+		case strings.Contains(a, "="):
+			k, v, _ := strings.Cut(a, "=")
+			key, sets[k] = k, v
+		default:
+			return nil, nil, fmt.Errorf("invalid label %q: want KEY=VALUE or KEY-", a)
+		}
+		if key == "" {
+			return nil, nil, fmt.Errorf("invalid label %q: empty key", a)
+		}
+		if seen[key] {
+			return nil, nil, fmt.Errorf("label %q given twice", key)
+		}
+		seen[key] = true
+	}
+	return sets, removes, nil
+}
+
+// mergeLabels applies sets/removes onto current. Without overwrite it refuses to
+// change a key that already exists — placement constraints are matched exactly,
+// so a silent overwrite would move workloads with no diff to review.
+func mergeLabels(current, sets map[string]string, removes []string, overwrite bool) (map[string]string, error) {
+	merged := map[string]string{}
+	for k, v := range current {
+		merged[k] = v
+	}
+	for k, v := range sets {
+		if strings.HasPrefix(k, reservedLabelPrefix) {
+			return nil, fmt.Errorf("label %q is reserved: %s* labels are set by the node itself", k, reservedLabelPrefix)
+		}
+		if old, exists := merged[k]; exists && old != v && !overwrite {
+			return nil, fmt.Errorf("label %q already set to %q; pass --overwrite to change it", k, old)
+		}
+		merged[k] = v
+	}
+	for _, k := range removes {
+		if strings.HasPrefix(k, reservedLabelPrefix) {
+			return nil, fmt.Errorf("label %q is reserved: %s* labels are set by the node itself", k, reservedLabelPrefix)
+		}
+		delete(merged, k)
+	}
+	return merged, nil
 }
 
 func newNodesDrainCmd() *cobra.Command {

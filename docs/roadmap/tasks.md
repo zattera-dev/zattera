@@ -3423,9 +3423,33 @@ replicas forever (check what the scheduler does today before shipping).
 **Tests:** unit — merge vs `--overwrite`, `key-` removal, reserved-prefix
 refusal, existing-key refusal without `--overwrite`, and that `schedulable` is
 preserved for a cordoned node.
-**Acceptance:** `go test ./internal/cli/ -run TestNodesLabel`
+**Acceptance:** `go test ./internal/cli/ -run 'TestParseLabelArgs|TestMergeLabels'`
 **Docs:** remove the "custom labels are API-only" callout from
 `docs/setup/nodes.md` and document the command there and in the CLI reference.
+
+**DONE** — `zt nodes label <name> KEY=VALUE|KEY- [--overwrite]` in
+`internal/cli/nodes.go`. Merge by default, `--overwrite` to change an existing
+key, `KEY-` to remove, `zattera.dev/*` refused on both set and remove (also
+under `--overwrite`), `builder` left writable, `--json` emits the resulting map.
+The schedulable gotcha was real: `SetNodeLabels` assigns `n.Schedulable =
+req.GetSchedulable()` unconditionally, so the command echoes the node's current
+value — verified on a dev cluster that a cordoned node stays `ALIVE,CORDONED`
+across a labeling call.
+
+**Correction to this task's premise:** step 4 claimed an unsatisfiable
+constraint parks replicas forever with no error. It does not — `Place` already
+returns "only 0 of N replicas placeable (constraints/capacity)" at the end.
+What was actually wrong is that the message could not distinguish a label typo
+from a full cluster. `placement.go` now tracks `labelRejected` alongside
+`archRejected` and returns `no node matches constraints region=eu`; the generic
+capacity error is unchanged, and a test asserts a matching-but-full node does
+**not** produce the constraint message.
+**Tests:** `internal/cli/nodes_test.go` (arg parsing incl. duplicate-key and
+`KEY=` empty-value, merge/overwrite/remove, reserved-prefix refusal, current-map
+not mutated, idempotent re-set allowed);
+`internal/daemon/scheduler/placement_test.go`
+(`TestUnsatisfiablePlacementConstraintErrors`,
+`TestPlacementConstraintSatisfiedByFullNode`).
 
 ---
 

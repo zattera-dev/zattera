@@ -78,6 +78,18 @@ Node **labels** (shown in `nodes ls`) are matched by apps through `[env.<name>.p
 | `zattera.dev/os-arch` | e.g. `linux/arm64` | The node's platform; how multi-arch images land on the right hardware |
 | `builder` | `true` | Set on every node with the `worker` role — the build dispatcher places builds here |
 
-::: callout note Custom labels are API-only today
-Arbitrary labels like `region=eu` are supported by the scheduler and by the `SetNodeLabels` API (admin-only), but **no CLI command sets them yet** — you'd have to call `PUT /v1/nodes/{node_id}/labels` directly. A `zt nodes label` command is tracked as T-96.
+Anything else is yours to set:
+
+```bash
+zt nodes label w1 region=eu tier=db     # add
+zt nodes label w1 region=us --overwrite # change an existing key
+zt nodes label w1 tier-                 # remove
+```
+
+Labels **merge** by default, and changing a key that already exists requires `--overwrite` — placement is matched exactly, so a silent overwrite would move workloads with nothing to review. `zattera.dev/*` labels are refused: they're facts the node asserts about its own hardware, and overwriting `os-arch` would place images on machines that can't run them.
+
+`region` is special beyond matching: the scheduler spreads an environment's replicas across distinct `region` values, so labeling nodes by region buys you multi-region spread even without a placement constraint.
+
+::: callout note Constraints that match nothing fail the deploy
+If no node carries the labels an environment asks for, placement fails with `no node matches constraints region=eu` rather than leaving replicas pending — a typo in a label surfaces as an error, not as a deploy that never finishes.
 :::
