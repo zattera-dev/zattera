@@ -39,15 +39,22 @@ The pinned Nixpacks CLI is downloaded from GitHub Releases on first use, checksu
 ### The build pipeline
 
 1. `zt deploy` tars the current directory (honoring ignore files) and streams it to the API in 1 MB chunks. If you hit Ctrl-C after the upload, the build continues server-side.
-2. The leader queues a **Build** and dispatches it to a node carrying the `builder=true` label — every worker gets it at boot, and you can take a node out of the build pool with [`zt nodes label <node> builder=false --overwrite`](../setup/nodes#nodes-labels-and-placement). The chosen node fetches the source tarball from the control plane over the mesh, authenticated with its own mTLS identity.
+2. The leader queues a **Build** and dispatches it to a node carrying the `builder=true` label — every worker gets it at boot, and you can take one out of the pool with [`zt nodes label <node> builder=false --overwrite`](../setup/nodes#nodes-labels-and-placement). The chosen node fetches the source tarball from the control plane over the mesh, authenticated with its own mTLS identity. See [where a build runs](#builds-registry-how-it-works-where-a-build-runs) for how the node is chosen.
 3. Builds run in a managed **BuildKit** daemon (the `zt-system-buildkitd` container, pinned to a version matching the client library so the wire protocol lines up). The builder starts it on demand before the first build and reuses it afterwards — you never install anything. Nixpacks runs first when needed, generating a Dockerfile plan that feeds the same BuildKit path.
 4. The resulting image is pushed to the embedded registry tagged `<registry>/<project>/<app>:<build-id>`, and the deploy continues into the [red/green rollout](./).
 
 The builder reuses any running `zt-system-buildkitd` without checking its version, so a Zattera upgrade that moves the BuildKit pin won't replace an already-running daemon. If builds start failing right after an upgrade, `docker rm -f zt-system-buildkitd` and let the next build recreate it.
 
-::: callout note Builds are not spread across nodes
-The dispatcher picks the **lowest-id alive** node labelled `builder=true` — not the least loaded — so on a healthy cluster every build lands on the same machine and its layer cache. Two consequences: build capacity doesn't grow by adding workers, and **cordoning a node does not stop builds landing on it** (only liveness is checked, not schedulability). To move builds off a node, set `builder=false` on it.
-:::
+### Where a build runs
+
+The dispatcher picks an **alive, schedulable** node labelled `builder=true`, ordered by how many builds are already running on it, with the node id as a deterministic tie-break. In practice:
+
+- **Idle cluster → the same node every time.** With every builder at zero, the tie-break wins, so consecutive builds reuse one machine's warm layer cache.
+- **Busy builder → the next one.** Work spills onto another builder only once the preferred one is actually building, so parallel deploys don't queue behind each other.
+- **Cordoned nodes are skipped.** [`zt nodes cordon`](../setup/nodes) takes a node out of the build pool too — which is what makes [`zt cluster upgrade`](../operations/upgrades) safe, since it cordons each node before restarting its daemon.
+- **`builder=false`** removes a node from the pool permanently.
+
+If no builder is schedulable — you cordoned the only one — the build **stays queued** rather than failing, and a `build.waiting_for_builder` event says so once. It dispatches on its own as soon as a builder returns; no need to redeploy.
 
 ### The embedded registry
 

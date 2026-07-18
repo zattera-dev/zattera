@@ -49,13 +49,25 @@ func (d *fakeDialer) RunBuild(_ context.Context, node *zatterav1.Node, req *clus
 	return d.stream, nil
 }
 
+// seedBuilder registers a builder node. Schedulable mirrors what
+// registerLocalNode writes in production — the dispatcher skips unschedulable
+// (cordoned) nodes (T-100), so a fixture without it would not represent a real
+// node.
 func seedBuilder(st *state.Store, id string) {
 	st.PutNode(&zatterav1.Node{
-		Meta:   &zatterav1.Meta{Id: id},
-		Status: zatterav1.NodeStatus_NODE_STATUS_ALIVE,
-		Labels: map[string]string{"builder": "true"},
-		Roles:  []zatterav1.NodeRole{zatterav1.NodeRole_NODE_ROLE_WORKER},
+		Meta:        &zatterav1.Meta{Id: id},
+		Status:      zatterav1.NodeStatus_NODE_STATUS_ALIVE,
+		Schedulable: true,
+		Labels:      map[string]string{"builder": "true"},
+		Roles:       []zatterav1.NodeRole{zatterav1.NodeRole_NODE_ROLE_WORKER},
 	})
+}
+
+// cordon marks a seeded node unschedulable, as `zt nodes cordon` does.
+func cordon(st *state.Store, id string) {
+	n, _ := st.Node(id)
+	n.Schedulable = false
+	st.PutNode(n)
 }
 
 func seedBuild(st *state.Store, id string) {
@@ -239,5 +251,87 @@ func TestBuildsDeploymentBuildFailed(t *testing.T) {
 	dep, _ = st.Deployment("d1")
 	if dep.GetPhase() != zatterav1.DeploymentPhase_DEPLOYMENT_PHASE_FAILED {
 		t.Fatalf("phase = %v, want FAILED", dep.GetPhase())
+	}
+}
+
+// TestBuildDispatchSkipsCordonedBuilder: cordon promises "no new work on this
+// node", and `cluster upgrade` cordons a node right before restarting its
+// daemon — dispatching a build there aims it at a process about to die. The
+// build must stay QUEUED and go through once the node is uncordoned (T-100).
+func TestBuildDispatchSkipsCordonedBuilder(t *testing.T) {
+	rs := raftstore.NewTestStore(t)
+	st := rs.State()
+	seedBuilder(st, "builder-a")
+	cordon(st, "builder-a")
+	seedBuild(st, "b1")
+
+	dial := &fakeDialer{stream: &fakeStream{events: []*clusterv1.BuildEvent{
+		{Status: zatterav1.BuildStatus_BUILD_STATUS_SUCCEEDED, ImageDigest: "sha256:abc123"},
+	}}}
+	d := NewBuildDispatcher(rs, clock.Real{}, dial, BuildDispatcherConfig{}, nil)
+	d.reconcile(context.Background())
+	time.Sleep(50 * time.Millisecond)
+
+	b, _ := st.Build("b1")
+	if b.GetStatus() != zatterav1.BuildStatus_BUILD_STATUS_QUEUED {
+		t.Fatalf("a cordoned builder must not take the build; status = %v", b.GetStatus())
+	}
+	if dial.gotNodeID != "" {
+		t.Fatalf("no dial should have happened, got node %q", dial.gotNodeID)
+	}
+
+	// The wait is visible rather than silent.
+	var found bool
+	for _, ev := range st.ListEvents(0) {
+		if ev.GetKind() == "build.waiting_for_builder" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("waiting for a builder should emit build.waiting_for_builder")
+	}
+
+	// Uncordon: the next pass dispatches it.
+	n, _ := st.Node("builder-a")
+	n.Schedulable = true
+	st.PutNode(n)
+	d.reconcile(context.Background())
+	waitBuild(t, st, "b1", zatterav1.BuildStatus_BUILD_STATUS_SUCCEEDED)
+}
+
+// TestBuildDispatchPrefersIdleBuilder: with everything idle the pick is sticky
+// (lowest id) so the BuildKit layer cache stays warm; once that node is busy,
+// the next build spills onto the idle one instead of queueing behind it.
+func TestBuildDispatchPrefersIdleBuilder(t *testing.T) {
+	rs := raftstore.NewTestStore(t)
+	st := rs.State()
+	seedBuilder(st, "builder-a")
+	seedBuilder(st, "builder-b")
+
+	d := NewBuildDispatcher(rs, clock.Real{}, &fakeDialer{}, BuildDispatcherConfig{}, nil)
+
+	// All idle → sticky on the lowest id (cache locality).
+	if n, ok := d.pickBuilder(); !ok || n.GetMeta().GetId() != "builder-a" {
+		t.Fatalf("idle cluster should pick builder-a, got %v (ok=%v)", n.GetMeta().GetId(), ok)
+	}
+
+	// builder-a busy → spill to builder-b.
+	st.PutBuild(&zatterav1.Build{
+		Meta:   &zatterav1.Meta{Id: "running-1"},
+		NodeId: "builder-a",
+		Status: zatterav1.BuildStatus_BUILD_STATUS_RUNNING,
+	})
+	if n, ok := d.pickBuilder(); !ok || n.GetMeta().GetId() != "builder-b" {
+		t.Fatalf("busy builder-a should spill to builder-b, got %v (ok=%v)", n.GetMeta().GetId(), ok)
+	}
+
+	// Both equally busy → deterministic tie-break back to the lowest id.
+	st.PutBuild(&zatterav1.Build{
+		Meta:   &zatterav1.Meta{Id: "running-2"},
+		NodeId: "builder-b",
+		Status: zatterav1.BuildStatus_BUILD_STATUS_RUNNING,
+	})
+	if n, ok := d.pickBuilder(); !ok || n.GetMeta().GetId() != "builder-a" {
+		t.Fatalf("equal load should tie-break to builder-a, got %v (ok=%v)", n.GetMeta().GetId(), ok)
 	}
 }

@@ -110,6 +110,8 @@ type BuildDispatcher struct {
 	mu       sync.Mutex
 	inflight map[string]bool
 	rings    map[string][]string
+	// noBuilderWarned dedupes the "waiting for a builder" event per build id.
+	noBuilderWarned map[string]bool
 }
 
 // NewBuildDispatcher constructs the dispatcher.
@@ -124,6 +126,7 @@ func NewBuildDispatcher(store *raftstore.Store, clk clock.Clock, dial BuildDiale
 		store: store, clk: clk, log: log, dial: dial, cfg: cfg,
 		lostTimeout: builderLostTimeout,
 		inflight:    map[string]bool{}, rings: map[string][]string{},
+		noBuilderWarned: map[string]bool{},
 	}
 }
 
@@ -197,10 +200,14 @@ func (d *BuildDispatcher) dispatch(ctx context.Context, b *zatterav1.Build) {
 
 	node, ok := d.pickBuilder()
 	if !ok {
-		// No builder available right now; leave QUEUED for a later pass.
-		d.log.Warn("no builder node available", "build", b.GetMeta().GetId())
+		// No builder available right now; leave the build QUEUED so a later pass
+		// picks it up once one returns (e.g. after `nodes uncordon`). Cordoning
+		// the only builder must delay a deploy, not fail it — but a build that
+		// silently waits looks identical to a hung one, so surface it once.
+		d.warnNoBuilderOnce(ctx, b)
 		return
 	}
+	d.clearNoBuilderWarning(b.GetMeta().GetId())
 
 	// Mark RUNNING (durable) before streaming so a failover can observe it.
 	b.Status = zatterav1.BuildStatus_BUILD_STATUS_RUNNING
@@ -304,11 +311,23 @@ func (d *BuildDispatcher) recv(ctx context.Context, stream BuildStream) (*cluste
 	}
 }
 
-// pickBuilder returns the lowest-id ALIVE node labelled builder=true.
+// pickBuilder chooses a builder node: ALIVE, schedulable, labelled
+// builder=true, ordered by fewest builds currently running on it and then by
+// node id.
+//
+// Schedulability is not optional — `cluster upgrade` cordons a node before
+// restarting its daemon, so dispatching a build to a cordoned node aims it at a
+// process that is about to go away (T-100).
+//
+// The (in-flight, id) order deliberately keeps builds sticky while the cluster
+// is idle: with every builder at zero, the id tie-break picks the same node
+// every time, so its BuildKit layer cache stays warm. Work only spills onto
+// another builder once the preferred one is actually busy.
 func (d *BuildDispatcher) pickBuilder() (*zatterav1.Node, bool) {
+	running := d.runningBuildsByNode()
 	var builders []*zatterav1.Node
 	for _, n := range d.store.State().ListNodes() {
-		if n.GetStatus() != zatterav1.NodeStatus_NODE_STATUS_ALIVE {
+		if n.GetStatus() != zatterav1.NodeStatus_NODE_STATUS_ALIVE || !n.GetSchedulable() {
 			continue
 		}
 		if n.GetLabels()["builder"] == "true" {
@@ -319,9 +338,58 @@ func (d *BuildDispatcher) pickBuilder() (*zatterav1.Node, bool) {
 		return nil, false
 	}
 	sort.Slice(builders, func(i, j int) bool {
+		li, lj := running[builders[i].GetMeta().GetId()], running[builders[j].GetMeta().GetId()]
+		if li != lj {
+			return li < lj
+		}
 		return builders[i].GetMeta().GetId() < builders[j].GetMeta().GetId()
 	})
 	return builders[0], true
+}
+
+// warnNoBuilderOnce emits a single event per build while it waits for a
+// builder. The dispatcher retries every tick, so without the dedupe a cordoned
+// builder would append an event every 15 seconds for as long as the cordon
+// lasts, drowning the event feed it is meant to inform.
+func (d *BuildDispatcher) warnNoBuilderOnce(ctx context.Context, b *zatterav1.Build) {
+	id := b.GetMeta().GetId()
+	d.mu.Lock()
+	already := d.noBuilderWarned[id]
+	if !already {
+		d.noBuilderWarned[id] = true
+	}
+	d.mu.Unlock()
+	if already {
+		return
+	}
+	d.log.Warn("no schedulable builder node; build stays queued", "build", id)
+	ev := &zatterav1.Event{
+		Meta:     &zatterav1.Meta{Id: ids.New(), CreatedAt: timestamppb.New(d.clk.Now())},
+		Kind:     "build.waiting_for_builder",
+		Severity: "warning",
+		Message:  "no schedulable builder node (cordoned, down, or builder=false); the build stays queued",
+	}
+	_ = d.apply(ctx, &clusterv1.Command{Mutation: &clusterv1.Command_AppendEvents{AppendEvents: &clusterv1.AppendEvents{Events: []*zatterav1.Event{ev}}}})
+}
+
+// clearNoBuilderWarning re-arms the warning for a build that found a builder,
+// so a later wait is reported again.
+func (d *BuildDispatcher) clearNoBuilderWarning(id string) {
+	d.mu.Lock()
+	delete(d.noBuilderWarned, id)
+	d.mu.Unlock()
+}
+
+// runningBuildsByNode counts RUNNING builds per node from replicated state, so
+// the load view survives a leader failover (the in-flight map does not).
+func (d *BuildDispatcher) runningBuildsByNode() map[string]int {
+	out := map[string]int{}
+	for _, b := range d.store.State().ListBuilds("") {
+		if b.GetStatus() == zatterav1.BuildStatus_BUILD_STATUS_RUNNING && b.GetNodeId() != "" {
+			out[b.GetNodeId()]++
+		}
+	}
+	return out
 }
 
 func (d *BuildDispatcher) fail(ctx context.Context, b *zatterav1.Build, msg string) {

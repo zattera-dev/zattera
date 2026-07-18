@@ -3677,6 +3677,32 @@ builders the one with fewer in-flight builds wins, ties broken by id.
 "builds are not spread across nodes" notes from `docs/deploy/builds.md` once
 this lands.
 
+**DONE** — `pickBuilder` now requires `Schedulable` alongside ALIVE +
+`builder=true`, and orders candidates by RUNNING builds on each node (counted
+from replicated state, so the view survives a failover) with the node id as
+tie-break.
+**Decision on step 4:** kept cache locality *and* got spreading, because the
+(in-flight, id) order gives both — with every builder idle the tie-break picks
+the same node every time, so its layer cache stays warm; work only spills once
+the preferred node is actually building. No separate stickiness mechanism was
+needed.
+A build with no schedulable builder stays QUEUED and emits
+`build.waiting_for_builder` **once per build** (the dispatcher retries every
+15s; without the dedupe a long cordon would append an event per tick — the
+T-98 lesson). The node-log warning is deduped the same way. Verified live:
+deploying against a cordoned single-node cluster left the build queued with
+buildkitd never starting, one event emitted, and `nodes uncordon` alone let
+the build run to completion with no redeploy.
+**Fixture correction:** `seedBuilder` never set `Schedulable`, so every builds
+test ran against a node that production would never produce
+(`registerLocalNode` always sets it). Two existing tests failed on the new
+rule; the fixture was fixed to mirror production rather than loosening the
+rule.
+**Tests:** `TestBuildDispatchSkipsCordonedBuilder` (queued + no dial + event,
+then dispatches after uncordon — confirmed to FAIL without the schedulable
+check), `TestBuildDispatchPrefersIdleBuilder` (idle→sticky, busy→spill,
+equal→deterministic tie-break).
+
 ---
 
 # Backlog (M4/M5 — do not implement now)
