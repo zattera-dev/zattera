@@ -17,8 +17,9 @@ zt env unset STRIPE_KEY --app api --env production
 ```
 
 - `zt env …` defaults to `--env production` (unlike `deploy`, which defaults to staging).
-- Inside an app directory, `--app` defaults to the name in `zattera.toml`.
-- `env pull` prints sorted `KEY=value` lines — pipe it into a local `.env` file if you need one.
+- **`--app` is required.** Unlike `deploy`, `logs`, `ps` and the rest, the `env` commands do *not* read the app name from `./zattera.toml` — omitting it fails with `--app is required`.
+- `env pull` prints sorted `KEY=value` lines. Without `--reveal` the values are **empty**, not hidden-but-present, so redirecting a plain `env pull` into a `.env` file gives you keys with blank values — use `--reveal` for that.
+- Listing keys at all needs the **developer** role; a viewer cannot see even the names.
 
 ### Changes apply on the next deploy
 
@@ -35,11 +36,15 @@ This is deliberate: a running release is immutable, so what's live is always exa
 
 At container start, alongside your variables:
 
-| Variable | Value |
-| -------- | ----- |
-| `PORT` | The first container port (unless you set `PORT` yourself) |
-| `ZATTERA_ENV` | Environment name (`production`, `staging`, …) |
-| `ZATTERA_APP` | App name |
+| Variable | Value | If you set it yourself |
+| -------- | ----- | ---------------------- |
+| `PORT` | The first container port | **Your value wins** |
+| `ZATTERA_ENV` | Environment name (`production`, `staging`, …) | **Silently overridden** |
+| `ZATTERA_APP` | App name | **Silently overridden** |
+
+`ZATTERA_ENV` and `ZATTERA_APP` are the platform's identity for the instance, so they're applied *after* your variables and always win. `zt env set ZATTERA_ENV=…` is accepted without complaint and then ignored at container start — if you need your own value, pick a different name.
+
+These apply anywhere the environment's release runs: services, [jobs and cron runs](../operations/jobs), and [preview environments](preview-environments) (whose variables are cloned from `staging` when the preview is created).
 
 ## How it works
 
@@ -49,4 +54,14 @@ Values are protected with **envelope encryption**:
 2. Each variable value is encrypted with **AES-GCM** under the data key *before* it enters the raft log — plaintext secrets never persist anywhere on disk.
 3. The plaintext data key lives only in control-node memory. When an agent needs to start a container, the control plane decrypts the variables at that moment and sends them over the **mTLS agent stream** — they exist in plaintext only inside that frame and in the container's process environment.
 
-Revealing values through the API (`env pull --reveal`) is gated by RBAC (developer role or higher) and requires the cluster key to be unsealed. The release config hash covers a fingerprint of the (encrypted) variables, which is how the platform knows a redeploy is needed to pick up changes.
+Reading variables at all (`GetEnvVars`, with or without `--reveal`) requires the **developer** role, and setting them requires an unsealed cluster key — otherwise `zt env set` fails with `cluster key is not unsealed; cannot store secrets` rather than storing anything in the clear.
+
+The release config hash covers a fingerprint of the environment's sealed variables (an FNV-1a hash over the sorted key/ciphertext pairs), which is how the platform knows a redeploy is needed to pick up changes.
+
+### Where else the ciphertext travels
+
+Variables are part of replicated cluster state, so the sealed form goes wherever state goes:
+
+- **`zt state export`** includes an `env_vars:` map of base64-encoded ciphertext per environment. It is not plaintext, but it is your secrets — treat an export as sensitive, and note that applying it to a different cluster leaves values undecryptable, since the data key differs.
+- **Backups** carry the same sealed values, and the [restore](../data/backup-restore) path needs the recovery passphrase to unseal them.
+- **Every control node** holds the plaintext data key in memory while running, which is one more reason to give control nodes the protection described in [high availability](../setup/high-availability).
