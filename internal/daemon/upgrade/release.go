@@ -28,7 +28,7 @@ import (
 // live on GitHub Releases, and this must stay in step with GITHUB_REPO in
 // install/install.sh: the two are the only ways a binary reaches a node, and
 // they must install the same artifact.
-const DefaultBaseURL = "https://github.com/adileo/zattera.dev/releases"
+const DefaultBaseURL = "https://github.com/zattera-dev/zattera/releases"
 
 // assetPrefix matches the names produced by `make cross` and consumed by
 // install/install.sh: zattera-<goos>-<goarch>.

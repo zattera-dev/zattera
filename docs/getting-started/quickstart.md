@@ -31,7 +31,7 @@ Boot a one-node cluster in dev mode and deploy an app over HTTP and HTTPS. Every
 1. **Build the binary**
 
    ```bash
-   git clone https://github.com/adileo/zattera.dev && cd zattera.dev
+   git clone https://github.com/zattera-dev/zattera && cd zattera
    go build -o zt ./cmd/zattera
    export PATH="$PWD:$PATH"
    ```

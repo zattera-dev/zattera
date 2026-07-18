@@ -11,11 +11,11 @@ description: Turn any pool of machines into a Heroku/Vercel-like cluster platfor
 Turn any pool of machines — bare metal, VPS, multi-cloud, the server under your desk — into a Heroku/Vercel-like cluster platform. One Go binary that is the CLI, the control plane, the scheduler, the proxy, the cert manager, and the registry. The only thing your servers need is Docker.
 
 ::: button "Get started" getting-started/quickstart color:#0e7490 icon:rocket
-::: button "View on GitHub" https://github.com/adileo/zattera.dev icon:github
+::: button "View on GitHub" https://github.com/zattera-dev/zattera icon:github
 :::
 
 ::: callout warning Pre-alpha
-Zattera is an ambitious, fast-moving experiment. We're looking for **early adopters and alpha testers** — expect sharp edges, and please [report what you find](https://github.com/adileo/zattera.dev/issues).
+Zattera is an ambitious, fast-moving experiment. We're looking for **early adopters and alpha testers** — expect sharp edges, and please [report what you find](https://github.com/zattera-dev/zattera/issues).
 :::
 
 ## From zero to deployed in four commands
@@ -180,5 +180,5 @@ Design discussions happen in Issues/Discussions; architecture decisions are reco
 :::
 
 ::: callout info License
-Zattera is open source under the [Apache-2.0 license](https://github.com/adileo/zattera.dev/blob/main/LICENSE).
+Zattera is open source under the [Apache-2.0 license](https://github.com/zattera-dev/zattera/blob/main/LICENSE).
 :::

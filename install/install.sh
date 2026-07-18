@@ -16,7 +16,7 @@ set -eu
 
 # Keep in step with upgrade.DefaultBaseURL (internal/daemon/upgrade/release.go):
 # this script and `zt cluster upgrade` must install the same artifact.
-GITHUB_REPO="adileo/zattera.dev"
+GITHUB_REPO="zattera-dev/zattera"
 
 info()  { echo "[zattera] $*"; }
 fatal() { echo "[zattera] ERROR: $*" 1>&2; exit 1; }
@@ -26,7 +26,7 @@ os=$(uname -s)
 case "$os" in
     Linux)  os=linux ;;
     Darwin) os=darwin ;;
-    *) fatal "unsupported OS: $os (for Windows, download zattera-windows-amd64.exe from https://github.com/adileo/zattera.dev/releases)" ;;
+    *) fatal "unsupported OS: $os (for Windows, download zattera-windows-amd64.exe from https://github.com/zattera-dev/zattera/releases)" ;;
 esac
 arch=$(uname -m)
 case "$arch" in
