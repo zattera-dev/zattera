@@ -47,6 +47,8 @@ The VERSION column marks anything not on the newest version with `!`. A node rep
 
 ## How the binary gets there
 
+Binaries come from **GitHub Releases** — the same artifacts `install.sh` uses, with the same `sha256sums.txt`. (`get.zattera.dev` serves only the install script; it never hosts binaries.) So a node upgraded by `zt cluster upgrade` and one upgraded by hand end up on byte-identical builds.
+
 The control plane resolves the target version to a per-architecture asset URL **and its SHA-256**, then hands both to the node. The node verifies the digest before executing anything.
 
 That ordering is deliberate: a node that fetched its own checksum from the same host it fetched the binary from would be trusting one source to vouch for itself.

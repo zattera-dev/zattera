@@ -23,6 +23,11 @@ import (
 // DefaultBaseURL is the official release host. Overridable for mirrors and
 // air-gapped clusters; the agent independently refuses any URL outside its own
 // configured base, so changing this alone cannot redirect a node.
+//
+// This is NOT get.zattera.dev — that serves the install script only. Binaries
+// live on GitHub Releases, and this must stay in step with GITHUB_REPO in
+// install/install.sh: the two are the only ways a binary reaches a node, and
+// they must install the same artifact.
 const DefaultBaseURL = "https://github.com/adileo/zattera.dev/releases"
 
 // assetPrefix matches the names produced by `make cross` and consumed by

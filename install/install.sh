@@ -14,6 +14,8 @@
 # Windows: download zattera-windows-amd64.exe from the releases page.
 set -eu
 
+# Keep in step with upgrade.DefaultBaseURL (internal/daemon/upgrade/release.go):
+# this script and `zt cluster upgrade` must install the same artifact.
 GITHUB_REPO="adileo/zattera.dev"
 
 info()  { echo "[zattera] $*"; }
