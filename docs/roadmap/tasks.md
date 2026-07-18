@@ -3705,6 +3705,156 @@ equal→deterministic tie-break).
 
 ---
 
+### T-101 — Registry pull-through between control nodes
+
+Phase 9 · Depends: T-32, T-55 · Size: M
+**Problem:** registry blobs are node-local by design (`internal/daemon/registry`,
+"NOT in raft"), which is the right storage decision — layers do not belong in a
+consensus log, and it keeps a 5 GB image costing 5 GB once rather than once per
+control node. But nothing reconciles *which* control node holds a blob with
+*which* one a node asks:
+
+- `registryClientAddr` returns each node's **own** address
+  (`internal/daemon/daemon.go`).
+- The build dispatcher runs on the **leader** and pushes to the leader's
+  registry (`BuildDispatcherConfig.RegistryAddr`).
+- The join server hands a joining node the registry address of **whichever
+  control node served the join** (`internal/daemon/api/join.go`), and the node
+  persists it in `mesh.json` and never refreshes it.
+
+So on a multi-control cluster a worker can be pointed at a control node that
+never received the push, and leadership changes scatter images across nodes over
+time. Losing a control node makes the images only it held unpullable — raft
+quorum keeps the control plane alive, not the image store. Single-control
+clusters are unaffected, which is why this has not bitten yet.
+
+**Decision (agreed with the user):** keep blobs node-local and make any control
+node able to *serve* any blob by fetching it from a peer on demand.
+Storage stays ~1×; the cost is one extra hop on a cold pull. This is the
+default, always-on behaviour, with no configuration. The optional durable
+backend is T-102 and layers on top.
+
+**Files:** `internal/daemon/registry/{httpapi,blobstore,pullthrough}.go` (new),
+`internal/daemon/registrywiring.go`, `internal/daemon/registry/*_test.go`,
+`docs/deploy/builds.md`,
+`docs/contributing/architecture-decision-records/0005-registry-blob-locality.md` (new)
+**Steps:**
+
+1. **Peer resolution.** Add a `PeerSource` the registry can ask for the other
+   control nodes' registry addresses — derived from state
+   (`ListNodes` → control role → mesh IP + registry port), never a static list,
+   so it follows joins and removals. Exclude self.
+2. **Blob pull-through.** In `Handler.blob`, when `store.Stat(dgst)` returns
+   `ErrBlobUnknown`, try each peer in turn: `HEAD /v2/<repo>/blobs/<dgst>`, then
+   `GET` and stream it into the local `BlobStore.Write` (which already
+   digest-verifies and commits atomically) while serving the same bytes to the
+   client. Serve from local storage on the retry path so a second pull is local.
+   Cache the fetched blob — the node that pulled it now has it, which is what
+   makes repeated pulls cheap and gradually heals the cluster.
+3. **Manifest pull-through.** Same treatment in `Handler.manifest`: a manifest
+   is a blob plus tag/refcount bookkeeping, so fetch it, then register it via
+   `Manifests` so the local refcount graph and GC stay correct. **Do not** blindly
+   copy tags — fetch by digest, and only bind a tag locally when the request was
+   by tag and the peer's tag resolves to that digest.
+4. **Auth between control nodes.** Peer fetches must authenticate as this node
+   (`node-<id>` credential, already minted at join and validated by
+   `registryAuthenticator`), over the mesh with the cluster CA. Never anonymous,
+   never a user PAT.
+5. **Bounded and safe.** Per-peer timeout, a total deadline shorter than the
+   Docker pull timeout, and a concurrency cap so one cold image cannot open a
+   fetch per layer per peer. Failure to reach a peer must fall through to the
+   next and finally return the normal OCI `BLOB_UNKNOWN`, never a 500.
+6. **Do not** fetch through to external registries (Docker Hub et al.) — this is
+   strictly intra-cluster. That is a separate feature with different security
+   properties.
+7. Write **ADR-0005** recording why blobs stay node-local (consensus log vs
+   layer size, storage amplification) and why pull-through was chosen over
+   replicate-all / always-address-the-leader.
+
+**Gotchas:** the fetch path must not deadlock the write path — `BlobStore.Write`
+streams to a temp file and renames, so serving while writing needs either a
+tee into the response or a write-then-serve-local (prefer the simpler
+write-then-serve unless a cold pull's latency proves unacceptable). A blob
+being uploaded concurrently by a push must not be half-served: only serve after
+commit. GC (`refDec`) must not delete a blob another node is mid-fetch — check
+whether the existing refcount covers a pulled-through blob with no local
+manifest yet, and give it a local reference if not. Dev mode is single-node:
+pull-through must be a no-op with zero peers, not an error.
+**Tests:** unit — a two-registry harness where node B serves a blob node A
+lacks: A's GET succeeds, A now `Has` the blob, a second GET never touches B;
+digest mismatch from a peer is rejected and not committed; no peers → clean
+`BLOB_UNKNOWN`; peer unreachable → next peer tried; manifest pull-through
+registers refcounts so a later GC does not orphan blobs. Integration in
+`test/cloud` if a multi-control rig is available: build on the leader, pull
+from a worker joined via a follower.
+**Acceptance:** `go test ./internal/daemon/registry/ -run 'PullThrough|Blob'`,
+plus a 3-control cloud cluster where an image built on the leader pulls
+successfully through a follower's registry.
+**Docs:** replace the "Blobs are node-local, not replicated" warning in
+`docs/deploy/builds.md` with the real behaviour: still one copy, any control
+node can serve it, and the durability caveat that remains until T-102.
+
+### T-102 — Optional S3-backed registry blob store
+
+Phase 9 · Depends: T-101, T-64 · Size: M
+**Problem:** with T-101 any control node can *serve* any blob, but every blob
+still exists only on the node(s) that happened to fetch it. Losing a control
+node's disk still loses images, and backups (`internal/daemon/backup`) cover
+state, CA and volume snapshot refs — **not** registry blobs. Clusters that want
+real image durability should be able to put blobs in the same object store they
+already use for volume snapshots and backups.
+
+**Decision (agreed with the user):** an **optional, opt-in** backend a cluster
+can adopt later — the default stays local disk + pull-through, and enabling S3
+must be an upgrade path, not a migration cliff.
+
+**Files:** `internal/daemon/registry/blobstore.go` (extract an interface),
+`internal/daemon/registry/s3blobs.go` (new), `internal/config/config.go`,
+`internal/daemon/registrywiring.go`, `docs/setup/configuration.md`,
+`docs/deploy/builds.md`
+**Steps:**
+
+1. Extract the blob backend behind an interface (`Has/Stat/Open/Write/Delete`
+   — the methods `httpapi.go` and `Manifests` already use), with the current
+   on-disk store as the default implementation. No behaviour change.
+2. Add an S3-backed implementation reusing `volumes.ObjectStore` /
+   `volumes.NewS3Store` — the S3 client, config shape and credentials handling
+   already exist for snapshots; do not write a second one. Key blobs by digest
+   (`blobs/sha256/<hex>`) so the store stays content-addressed.
+3. Config: `[registry] backend = "local" | "s3"` (default `local`) plus the S3
+   connection settings, mirroring how backups are configured. Sealed
+   credentials, same as the backup destination.
+4. **Local read cache.** An S3 backend must still cache blobs on local disk
+   after first fetch — pulling multi-hundred-MB layers from S3 on every
+   container start is not acceptable. Bound the cache and evict by LRU.
+5. **Adoption path.** Switching an existing cluster from `local` to `s3` must
+   upload the blobs it already has rather than orphaning them: a one-shot
+   migration (`zt registry migrate`, or automatic on first boot with the new
+   backend) that walks the local store and puts anything missing. Idempotent and
+   resumable — it moves gigabytes.
+6. Decide and document what GC means with a shared backend: refcounts are
+   currently per-node bbolt, but with one shared bucket two nodes must not
+   independently delete a shared blob. Either move the refcount graph to raft
+   (small, unlike blobs) or make S3-mode GC leader-only. **Ask before
+   choosing** — it changes the consistency story.
+
+**Gotchas:** S3 is not POSIX — `Open` returning an `*os.File` is a leaky
+signature, so the interface extraction in step 1 must return `io.ReadSeekCloser`
+(`http.ServeContent` needs seeking, or the handler switches to a ranged read).
+Multipart upload is required for large layers. Do not let an S3 outage take the
+whole registry down for images already cached locally. Air-gapped clusters must
+keep working on the default backend — this feature must never become required.
+**Tests:** the interface's contract suite run against both backends; migration
+is idempotent and resumable; a cached blob is served without an S3 round-trip;
+S3 unreachable serves cached blobs and fails cleanly for the rest.
+**Acceptance:** `go test ./internal/daemon/registry/ -run 'Backend|S3'`, plus a
+cluster switched from local to s3 that still pulls every pre-existing image.
+**Docs:** `[registry] backend` in the configuration reference; a "durable image
+storage" section in `docs/deploy/builds.md` explaining the trade (default =
+zero dependencies, opt-in = survives losing a control node).
+
+---
+
 # Backlog (M4/M5 — do not implement now)
 
 - **M4:** SSO/OIDC login; wildcard certs via DNS-01 (libdns providers);
@@ -3949,5 +4099,5 @@ P6: T-55(17,08)→T-56 · T-57(20)→T-58 · T-59(13)→T-60(41)/T-61(23) ·
 P7: T-69(61,42)→T-70→T-71 · T-72(45)→T-73 · T-74(59,07) · T-75(37,45) ·
     T-76 · T-77(65) · T-78 · T-79(54) · T-80(all)
 P8: T-81(12)→T-82→T-83 · T-84(83,17,29)→T-85(84) · T-86(84,85)
-P9: T-91(53,40) · T-92(66,76) · T-93(14) · T-94(19) · T-95(93,94,54) · T-96(12) · T-97(87,88) · T-98(63,97) · T-99(31) · T-100(35,95)
+P9: T-91(53,40) · T-92(66,76) · T-93(14) · T-94(19) · T-95(93,94,54) · T-96(12) · T-97(87,88) · T-98(63,97) · T-99(31) · T-100(35,95) · T-101(32,55)→T-102(101,64)
 ```
