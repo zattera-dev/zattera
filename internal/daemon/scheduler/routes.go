@@ -165,6 +165,7 @@ func (b *RouteBuilder) build() *clusterv1.RouteSnapshot {
 				Endpoints:       b.endpoints(st, env, portName),
 				ScaleToZero:     spec.GetScaleToZero(),
 				MaxConcurrency:  spec.GetMaxConcurrency(),
+				RateLimit:       spec.GetRateLimit(),
 				RouteGeneration: env.GetRouteGeneration(),
 			})
 			certHosts[dom.GetHostname()] = true
@@ -181,6 +182,7 @@ func (b *RouteBuilder) build() *clusterv1.RouteSnapshot {
 				Endpoints:       b.endpoints(st, env, httpPort),
 				ScaleToZero:     spec.GetScaleToZero(),
 				MaxConcurrency:  spec.GetMaxConcurrency(),
+				RateLimit:       spec.GetRateLimit(),
 				RouteGeneration: env.GetRouteGeneration(),
 			})
 			certHosts[host] = true

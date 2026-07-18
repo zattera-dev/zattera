@@ -4318,6 +4318,22 @@
         }
       }
     },
+    "v1RateLimit": {
+      "type": "object",
+      "properties": {
+        "requestsPerSecond": {
+          "type": "integer",
+          "format": "int64",
+          "title": "0 = disabled"
+        },
+        "burst": {
+          "type": "integer",
+          "format": "int64",
+          "title": "bucket depth; 0 defaults to requests_per_second"
+        }
+      },
+      "description": "RateLimit caps requests per client IP at the ingress proxy. Each ingress node\nkeeps its own token buckets — there is no cross-node coordination — so the\ncluster-wide ceiling is requests_per_second × the number of ingress nodes.\nPer-client enforcement is still exact in practice because DNS caching pins a\ngiven client to one node. See docs/networking/ingress.md."
+    },
     "v1Release": {
       "type": "object",
       "properties": {
@@ -4535,6 +4551,10 @@
             "type": "string"
           },
           "title": "node label selectors, e.g. {\"region\": \"eu\"}"
+        },
+        "rateLimit": {
+          "$ref": "#/definitions/v1RateLimit",
+          "title": "per-ingress-node request cap (unset = off)"
         }
       },
       "description": "ServiceSpec is the desired runtime shape of an app in one environment\n(spec §4). It is versioned into a Release via config_hash."

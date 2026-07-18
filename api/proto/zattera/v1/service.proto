@@ -21,6 +21,17 @@ message ServiceSpec {
   google.protobuf.Duration stop_grace = 11; // SIGTERM → SIGKILL window, default 10s
   string command = 12;                      // override image CMD (shell form)
   map<string, string> placement_constraints = 13; // node label selectors, e.g. {"region": "eu"}
+  RateLimit rate_limit = 14;                      // per-ingress-node request cap (unset = off)
+}
+
+// RateLimit caps requests per client IP at the ingress proxy. Each ingress node
+// keeps its own token buckets — there is no cross-node coordination — so the
+// cluster-wide ceiling is requests_per_second × the number of ingress nodes.
+// Per-client enforcement is still exact in practice because DNS caching pins a
+// given client to one node. See docs/networking/ingress.md.
+message RateLimit {
+  uint32 requests_per_second = 1; // 0 = disabled
+  uint32 burst = 2;               // bucket depth; 0 defaults to requests_per_second
 }
 
 message ReplicaRange {

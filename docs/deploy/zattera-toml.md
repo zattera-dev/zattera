@@ -117,6 +117,40 @@ The implicit check is only added when the service exposes an **HTTP** port. If e
 | `[env.<name>.resources]` | — | `cpu_millis`, `memory_mb` reservations (used for placement) |
 | `[env.<name>.autoscale]` | — | [Autoscaling](../scaling/autoscaling) targets: `target_cpu_percent`, `target_memory_percent`, `target_rps_per_replica` |
 | `[env.<name>.placement]` | — | Node label constraints (string map); set labels with [`zt nodes label`](../setup/nodes#nodes-labels-and-placement) |
+| `[env.<name>.rate_limit]` | off | Per-client-IP request cap at the ingress — see below |
+
+#### `[env.<name>.rate_limit]`
+
+| Key | Default | Meaning |
+| --- | ------- | ------- |
+| `requests_per_second` | **none — required** | Sustained requests allowed per client IP |
+| `burst` | `requests_per_second` | Bucket depth: how many requests a client may fire back-to-back before the sustained rate applies |
+
+Omit the section and there is no limiting — this is off by default and opt-in per
+environment.
+
+```toml
+[env.production.rate_limit]
+requests_per_second = 20
+burst = 40
+```
+
+Requests over the limit get `429` with a `Retry-After` header, and never reach
+your container. The limit applies to every hostname serving that environment:
+custom domains and the built-in `<app>-<env>.<cluster-domain>` subdomain alike.
+
+**The limit is per ingress node.** Each node keeps its own counters with no
+cross-node coordination, so with N nodes serving traffic the cluster-wide
+ceiling is `requests_per_second × N`. In practice a single client is pinned to
+one node by DNS caching, so per-client enforcement matches what you configured —
+it is the aggregate across many clients that can exceed it. Size the number for
+"one abusive client", not for a global quota.
+
+Clients are identified by the connection's source address. `X-Forwarded-For` is
+deliberately ignored: it is trivially spoofable, and trusting it would let any
+caller mint unlimited identities. If you run another proxy or CDN in front of
+Zattera, every request will appear to come from that proxy's IP and share a
+single bucket.
 
 #### `[[env.<name>.ports]]`
 
@@ -155,6 +189,8 @@ Two layers validate, and they fail at different moments.
 | A cron entry with no `schedule`, or one that isn't 5 fields | `schedule is required` / `must be a 5-field cron expression` |
 | Any duration that `time.ParseDuration` rejects, or is negative | `invalid duration "…"` / `duration must be >= 0` |
 | A `platforms` entry that isn't a known `os/arch` | `build.platforms: …` |
+| `rate_limit` with no `requests_per_second` | `requests_per_second must be > 0 (omit the section to disable)` |
+| `rate_limit.burst` below `requests_per_second` | `burst (N) must be >= requests_per_second (M)` |
 
 **Checked by the server** on apply:
 

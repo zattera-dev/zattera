@@ -40,6 +40,10 @@ type L7 struct {
 	cidrMu    sync.Mutex
 	cidrVer   uint64
 	cidrCache map[string][]*net.IPNet
+
+	// limiter holds per-client token buckets for routes with a rate limit
+	// configured. Node-local by design (T-107).
+	limiter *rateLimiter
 }
 
 // NewL7 builds an L7 proxy over a route source. node is this node's id (used to
@@ -53,6 +57,7 @@ func NewL7(source RouteSource, node string, clk clock.Clock) *L7 {
 	return &L7{
 		source: source, node: node, stats: NewStats(clk), lb: newBalancer(node),
 		tr: tr, clk: clk, rnd: rand.IntN, cidrCache: map[string][]*net.IPNet{},
+		limiter: newRateLimiter(clk),
 	}
 }
 
@@ -84,6 +89,17 @@ func (p *L7) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !allowedIP(r.RemoteAddr, p.cidrs(snap, route)) {
 		writeProxyError(w, http.StatusForbidden, "forbidden")
 		return
+	}
+	// Rate limit before basic auth, so credential guessing is throttled too,
+	// and before endpoint selection, so shed requests never occupy a backend
+	// slot (T-107).
+	if rl := route.GetRateLimit(); rl.GetRequestsPerSecond() > 0 {
+		key := route.GetEnvironmentId() + "|" + clientIP(r.RemoteAddr)
+		if !p.limiter.allow(key, float64(rl.GetRequestsPerSecond()), float64(rl.GetBurst())) {
+			w.Header().Set("Retry-After", "1")
+			writeProxyError(w, http.StatusTooManyRequests, "rate limit exceeded")
+			return
+		}
 	}
 	if !checkBasicAuth(r, mw.GetBasicAuth()) {
 		w.Header().Set("WWW-Authenticate", `Basic realm="zattera"`)

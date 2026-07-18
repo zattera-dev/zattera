@@ -9,6 +9,7 @@ syntax = "proto3";
 package zattera.cluster.v1;
 
 import "zattera/v1/domain.proto";
+import "zattera/v1/service.proto";
 
 service RouteService {
   rpc WatchRoutes(WatchRoutesRequest) returns (stream RouteSnapshot);
@@ -53,6 +54,9 @@ message HTTPRoute {
   bool scale_to_zero = 10;
   uint32 max_concurrency = 11; // serverless per-replica concurrency cap (0 = off)
   uint64 route_generation = 12;
+  // Per-client-IP rate limit, copied from the environment's ServiceSpec so it
+  // covers custom domains and the implicit cluster subdomain alike.
+  zattera.v1.RateLimit rate_limit = 13;
 }
 
 message L4Route {

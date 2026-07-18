@@ -30,6 +30,12 @@ Requests match by exact hostname, then longest path prefix. The proxy speaks HTT
 
 Per-route middleware is available (HTTPS redirect, compression, basic auth, IP allowlists, body size limits), including **sticky sessions** — an opaque `zt_sticky` cookie pins a client to an instance, re-validated each request and re-pinned automatically if the instance drains or fails.
 
+### Rate limiting
+
+An environment can cap requests per client IP with [`[env.<name>.rate_limit]`](../deploy/zattera-toml#zatteratoml-reference-envnameratelimit). It is off unless you configure it. Over-limit requests are shed with `429` before basic auth runs and before an instance is picked, so they cost no backend capacity.
+
+Counters are **per ingress node** — there is no cross-node coordination, which keeps the limiter on the same "keep serving through a control-plane outage" footing as the rest of ingress. With traffic spread over N nodes the cluster-wide ceiling is therefore `requests_per_second × N`, while any individual client still sees the configured rate because DNS caching keeps it on one node.
+
 ### TLS everywhere
 
 HTTPS terminates in-process with certificates from the embedded ACME manager — issued on demand, stored in replicated cluster state so every node can serve every certificate. Details in [Custom domains](../deploy/custom-domains#custom-domains-how-it-works-tls-certificates). In dev mode the cluster CA signs certificates instead, no internet required.

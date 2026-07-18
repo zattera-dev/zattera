@@ -101,6 +101,12 @@ type envSection struct {
 	Volumes        []volumeSection   `toml:"volumes"`
 	Cron           []cronSection     `toml:"cron"`
 	Placement      map[string]string `toml:"placement"`
+	RateLimit      *rateLimitSection `toml:"rate_limit"`
+}
+
+type rateLimitSection struct {
+	RequestsPerSecond uint32 `toml:"requests_per_second"`
+	Burst             uint32 `toml:"burst"`
 }
 
 type autoscaleSection struct {
@@ -311,6 +317,23 @@ func serviceSpec(name string, env *envSection, hc *zatterav1.HealthCheck, global
 
 	if len(env.Placement) > 0 {
 		spec.PlacementConstraints = env.Placement
+	}
+
+	// Rate limit: absent section = off. burst defaults to one second's worth of
+	// requests, and may not be below rps — a burst under the sustained rate can
+	// never be refilled into, so it would silently cap throughput below the
+	// stated limit.
+	if rl := env.RateLimit; rl != nil {
+		if rl.RequestsPerSecond == 0 {
+			return nil, nil, 0, fmt.Errorf("appconfig: env.%s.rate_limit.requests_per_second must be > 0 (omit the section to disable)", name)
+		}
+		burst := rl.Burst
+		if burst == 0 {
+			burst = rl.RequestsPerSecond
+		} else if burst < rl.RequestsPerSecond {
+			return nil, nil, 0, fmt.Errorf("appconfig: env.%s.rate_limit.burst (%d) must be >= requests_per_second (%d)", name, burst, rl.RequestsPerSecond)
+		}
+		spec.RateLimit = &zatterav1.RateLimit{RequestsPerSecond: rl.RequestsPerSecond, Burst: burst}
 	}
 
 	// Idle timeout (Environment-level, returned separately).

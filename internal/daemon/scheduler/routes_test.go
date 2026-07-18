@@ -78,6 +78,33 @@ func TestRoutesBuild(t *testing.T) {
 	}
 }
 
+// TestRoutesRateLimitOnBothRouteKinds pins the reason the rate limit lives on
+// ServiceSpec rather than Domain.Middleware: the implicit cluster subdomain is
+// built without any Domain, so domain-level config would leave it unprotected
+// even though it is internet-exposed (T-107).
+func TestRoutesRateLimitOnBothRouteKinds(t *testing.T) {
+	b, st := newBuilder(t)
+	seedRouteEnv(st)
+	healthyAssignment(st, "a1", "relA", 30001)
+	st.PutDomain(&zatterav1.Domain{
+		Meta: &zatterav1.Meta{Id: "dom1"}, ProjectId: "proj", EnvironmentId: envID, Hostname: "api.example.com",
+	})
+
+	env, _ := st.Environment(envID)
+	env.GetService().RateLimit = &zatterav1.RateLimit{RequestsPerSecond: 25, Burst: 50}
+	st.PutEnvironment(env)
+
+	for _, host := range []string{"api.example.com", "api-production.apps.example.com"} {
+		rt := findRoute(t, b, host)
+		if rt == nil {
+			t.Fatalf("route %q missing", host)
+		}
+		if rt.GetRateLimit().GetRequestsPerSecond() != 25 || rt.GetRateLimit().GetBurst() != 50 {
+			t.Errorf("route %q rate limit = %v, want 25/50", host, rt.GetRateLimit())
+		}
+	}
+}
+
 func TestRoutesPromoteSwapsEndpoints(t *testing.T) {
 	b, st := newBuilder(t)
 	seedRouteEnv(st)

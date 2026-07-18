@@ -143,6 +143,8 @@ func TestValidationErrors(t *testing.T) {
 		{"volume missing path", "[app]\nname='x'\n[env.prod]\n[[env.prod.volumes]]\nname='v'\n", "mount_path are required"},
 		{"bad platform", "[app]\nname='x'\n[build]\nplatforms=['linux/sparc']\n", "build.platforms"},
 		{"malformed platform", "[app]\nname='x'\n[build]\nplatforms=['amd64']\n", "os/arch"},
+		{"rate limit zero rps", "[app]\nname='x'\n[env.prod.rate_limit]\nburst=10\n", "requests_per_second must be > 0"},
+		{"rate limit burst below rps", "[app]\nname='x'\n[env.prod.rate_limit]\nrequests_per_second=100\nburst=10\n", "must be >= requests_per_second"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -154,6 +156,37 @@ func TestValidationErrors(t *testing.T) {
 				t.Errorf("error = %q, want substring %q", err.Error(), tc.want)
 			}
 		})
+	}
+}
+
+func TestParseRateLimit(t *testing.T) {
+	// Off unless declared — the default must stay "no limiting".
+	cfg, err := Parse([]byte("[app]\nname='x'\n[env.prod]\n"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if rl := cfg.Services["prod"].GetRateLimit(); rl != nil {
+		t.Fatalf("rate limit = %v with no [rate_limit] section, want nil", rl)
+	}
+
+	// burst defaults to one second's worth of requests.
+	cfg, err = Parse([]byte("[app]\nname='x'\n[env.prod.rate_limit]\nrequests_per_second=50\n"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	rl := cfg.Services["prod"].GetRateLimit()
+	if rl.GetRequestsPerSecond() != 50 || rl.GetBurst() != 50 {
+		t.Fatalf("rate limit = %d rps / %d burst, want 50/50", rl.GetRequestsPerSecond(), rl.GetBurst())
+	}
+
+	// Explicit burst is preserved.
+	cfg, err = Parse([]byte("[app]\nname='x'\n[env.prod.rate_limit]\nrequests_per_second=10\nburst=40\n"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	rl = cfg.Services["prod"].GetRateLimit()
+	if rl.GetRequestsPerSecond() != 10 || rl.GetBurst() != 40 {
+		t.Fatalf("rate limit = %d rps / %d burst, want 10/40", rl.GetRequestsPerSecond(), rl.GetBurst())
 	}
 }
 

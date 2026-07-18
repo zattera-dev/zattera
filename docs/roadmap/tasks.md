@@ -4148,6 +4148,74 @@ with a non-zero exit; no success line is printed before the first dial.
 **Acceptance:** `go test ./internal/daemon/api/ -run TestPortForward`, plus
 `zt port-forward` actually serving traffic against `zattera server --dev`.
 
+### T-107 — Per-client rate limiting at the ingress ✅ **DONE**
+
+Phase 9 · Depends: T-19 · Size: S
+**Problem:** the L7 proxy had no rate limiting of any kind, so an app exposed
+to the internet had no built-in defence against a single client hammering it.
+**Files:** `api/proto/zattera/v1/service.proto`,
+`api/proto/zattera/cluster/v1/routes.proto`, `internal/appconfig/appconfig.go`,
+`internal/daemon/proxy/ratelimit.go` (new), `internal/daemon/proxy/l7.go`,
+`internal/daemon/scheduler/routes.go`
+**Done:**
+
+1. `RateLimit{requests_per_second, burst}` on **ServiceSpec**, not on
+   `Middleware`. Two reasons: `Middleware` is unreachable from `zattera.toml`
+   (TOML `domains` are never applied — see T-108), and `RouteBuilder` emits the
+   implicit `<app>-<env>.<domain>` route with no `Domain` behind it, so
+   domain-level config would leave that internet-exposed hostname unprotected.
+2. `[env.<name>.rate_limit]` in `zattera.toml`; absent = off. `burst` defaults
+   to `requests_per_second` and may not be lower (a burst under the sustained
+   rate can never refill, silently capping throughput below the stated limit).
+3. `rateLimiter` — per-key token buckets over the injected `clock.Clock`, keyed
+   `environment_id|client_ip`. Bounded at 32k keys with an idle sweep plus
+   arbitrary-eviction fallback; eviction fails open (a dropped bucket restarts
+   full) rather than falsely throttling.
+4. Checked in `ServeHTTP` after the IP allowlist and **before** basic auth and
+   endpoint selection, so credential guessing is throttled too and shed
+   requests never occupy a backend slot. Over-limit = `429` + `Retry-After`.
+
+**Gotchas:** the limiter is deliberately node-local — no gossip, no shared
+counters — so the cluster-wide ceiling is `rps × ingress nodes` while per-client
+enforcement stays exact under DNS pinning. Client identity is `RemoteAddr`
+only; trusting `X-Forwarded-For` would let any caller mint unlimited buckets.
+Documented in both `docs/deploy/zattera-toml.md` and `docs/networking/ingress.md`.
+**Tests:** `internal/daemon/proxy/ratelimit_test.go` (bucket refill/cap/
+independence/eviction, 429 + backend-never-reached, off-by-default, per-env
+isolation), `TestParseRateLimit` + validation cases, and
+`TestRoutesRateLimitOnBothRouteKinds` pinning point 1.
+**Acceptance:** `go test ./internal/daemon/proxy/ ./internal/appconfig/
+./internal/daemon/scheduler/`
+
+### T-108 — `zattera.toml` `domains` are parsed and then dropped
+
+Phase 9 · Depends: T-11 · Size: S
+**Problem:** `appconfig` parses `env.<name>.domains` into `AppConfig.Domains`,
+and nothing ever applies it — `internal/cli/apply.go` carries a
+`TODO(T-40): apply ac.Domains via DomainService`, but T-40 is the logstore task
+and has been done for a long time, so the reference is stale and the work is
+unowned. A user who declares `domains = ["api.example.com"]` in `zattera.toml`
+gets silence: no domain, no error. Found while implementing T-107.
+**Files:** `internal/cli/apply.go`, `internal/cli/deploy.go`,
+`internal/appconfig/appconfig.go`
+**Steps:**
+
+1. Apply `ac.Domains` through `DomainService` on `zt apply`/`zt deploy`:
+   create domains that are absent, and decide explicitly whether a domain
+   removed from the TOML is deleted or left alone (declarative would say
+   delete; that destroys certs, so it likely needs a confirmation or a flag).
+2. Fix the stale `TODO(T-40)` reference either way.
+3. Consider whether `Middleware` (basic auth, IP allowlist, body limits)
+   should become TOML-settable in the same pass — today it is API/CLI-only,
+   which is why T-107 put the rate limit on `ServiceSpec` instead.
+
+**Gotchas:** domains are project-scoped while `ApplyAppConfig` is app-scoped;
+a hostname may already belong to another environment, which must be a clear
+error rather than a silent steal. Deleting a domain drops its certificate.
+**Tests:** apply with a new domain creates it; re-apply is idempotent; a
+hostname owned by another env fails with a useful message.
+**Acceptance:** `go test ./internal/cli/ ./internal/daemon/api/ -run Domain`
+
 ---
 
 # Backlog (M4/M5 — do not implement now)
@@ -4394,5 +4462,5 @@ P6: T-55(17,08)→T-56 · T-57(20)→T-58 · T-59(13)→T-60(41)/T-61(23) ·
 P7: T-69(61,42)→T-70→T-71 · T-72(45)→T-73 · T-74(59,07) · T-75(37,45) ·
     T-76 · T-77(65) · T-78 · T-79(54) · T-80(all)
 P8: T-81(12)→T-82→T-83 · T-84(83,17,29)→T-85(84) · T-86(84,85)
-P9: T-91(53,40) · T-92(66,76) · T-93(14) · T-94(19) · T-95(93,94,54) · T-96(12) · T-97(87,88) · T-98(63,97) · T-99(31) · T-100(35,95) · T-101(32,55)→T-102(101,64) · T-103(12) · T-104(44) · T-105(44) · T-106(51)
+P9: T-91(53,40) · T-92(66,76) · T-93(14) · T-94(19) · T-95(93,94,54) · T-96(12) · T-97(87,88) · T-98(63,97) · T-99(31) · T-100(35,95) · T-101(32,55)→T-102(101,64) · T-103(12) · T-104(44) · T-105(44) · T-106(51) · T-107(19) · T-108(11)
 ```
