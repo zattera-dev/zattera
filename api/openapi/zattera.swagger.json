@@ -398,6 +398,39 @@
         ]
       }
     },
+    "/v1/cluster/unseal": {
+      "post": {
+        "summary": "Unseal installs the cluster data key on THIS node from the recovery\npassphrase. A node that did not bootstrap the cluster comes up sealed\n(T-111): it serves normally but cannot read or write secrets, so\nalerting, env-var writes and backups stay disabled until this is called\nor the node recovers the key from a control peer.",
+        "operationId": "AuthService_Unseal",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/v1UnsealResponse"
+            }
+          },
+          "default": {
+            "description": "An unexpected error response.",
+            "schema": {
+              "$ref": "#/definitions/rpcStatus"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/v1UnsealRequest"
+            }
+          }
+        ],
+        "tags": [
+          "AuthService"
+        ]
+      }
+    },
     "/v1/cluster/upgrade/plan": {
       "post": {
         "summary": "UpgradePlan returns the ordered node-by-node plan for bringing the whole\ncluster to one version, plus anything the operator should know before\nstarting (T-95). Read-only.",
@@ -4750,6 +4783,24 @@
         }
       }
     },
+    "v1UnsealRequest": {
+      "type": "object",
+      "properties": {
+        "passphrase": {
+          "type": "string",
+          "title": "the cluster recovery passphrase"
+        }
+      }
+    },
+    "v1UnsealResponse": {
+      "type": "object",
+      "properties": {
+        "alreadyUnsealed": {
+          "type": "boolean",
+          "title": "true when the node was not sealed to begin with"
+        }
+      }
+    },
     "v1UpgradeNodeResponse": {
       "type": "object",
       "properties": {
@@ -5000,6 +5051,10 @@
         "clusterDomain": {
           "type": "string",
           "description": "Cluster app domain (cfg.domain): apps publish at \u003capp\u003e-\u003cenv\u003e.\u003ccluster_domain\u003e.\nEmpty when the node has no configured domain."
+        },
+        "sealed": {
+          "type": "boolean",
+          "description": "sealed reports that the node serving this request holds no cluster data\nkey: secret reads/writes, alert delivery and backups are unavailable on it\nuntil it is unsealed. Per-process, not cluster-wide replicated state."
         }
       }
     },

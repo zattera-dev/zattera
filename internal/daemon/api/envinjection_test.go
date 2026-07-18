@@ -16,10 +16,7 @@ import (
 // PORT overrides the default, and an env-var change flows into the config hash.
 func TestEnvInjection(t *testing.T) {
 	dataKey, _ := secrets.GenerateDataKey()
-	sealer, err := secrets.NewSealer(dataKey, 1)
-	if err != nil {
-		t.Fatalf("new sealer: %v", err)
-	}
+	vault := mustVault(mustKeyring(dataKey, 1))
 
 	st := state.New()
 	st.PutApp(&zatterav1.App{Meta: &zatterav1.Meta{Id: "app1"}, Name: "web"})
@@ -32,13 +29,13 @@ func TestEnvInjection(t *testing.T) {
 		ImageRef: "registry.example/web@sha256:abc", Service: spec,
 	})
 
-	sealed, err := sealer.Seal([]byte("s3cr3t"))
+	sealed, err := vault.Seal([]byte("s3cr3t"))
 	if err != nil {
 		t.Fatalf("seal: %v", err)
 	}
 	st.SetEnvVars("env1", map[string]*zatterav1.EncryptedValue{"TOKEN": sealed}, nil)
 
-	s := NewSyncServer(st, nil, livestate.New(clock.NewFake()), clock.NewFake(), nil, sealer)
+	s := NewSyncServer(st, nil, livestate.New(clock.NewFake()), clock.NewFake(), nil, vault)
 	a := &zatterav1.Assignment{
 		Meta: &zatterav1.Meta{Id: "a1"}, ReleaseId: "rel1",
 		AppId: "app1", EnvironmentId: "env1",
@@ -65,7 +62,7 @@ func TestEnvInjection(t *testing.T) {
 	}
 
 	// A user-set PORT overrides the injected default.
-	userPort, _ := sealer.Seal([]byte("9999"))
+	userPort, _ := vault.Seal([]byte("9999"))
 	st.SetEnvVars("env1", map[string]*zatterav1.EncryptedValue{"PORT": userPort}, nil)
 	if got := s.buildRuntime(a).GetEnv()["PORT"]; got != "9999" {
 		t.Fatalf("user PORT override = %q, want 9999", got)
@@ -76,7 +73,7 @@ func TestEnvInjection(t *testing.T) {
 // so the next deploy freezes a distinct release (T-50 step 2).
 func TestEnvInjectionHashChanges(t *testing.T) {
 	dataKey, _ := secrets.GenerateDataKey()
-	sealer, _ := secrets.NewSealer(dataKey, 1)
+	vault := mustVault(mustKeyring(dataKey, 1))
 	st := state.New()
 	spec := &zatterav1.ServiceSpec{Ports: []*zatterav1.PortSpec{{Name: "http", ContainerPort: 8080}}}
 
@@ -84,14 +81,14 @@ func TestEnvInjectionHashChanges(t *testing.T) {
 
 	base := appconfig.ConfigHash(spec, s.envVarVersion("env1")) // no vars
 
-	v1, _ := sealer.Seal([]byte("one"))
+	v1, _ := vault.Seal([]byte("one"))
 	st.SetEnvVars("env1", map[string]*zatterav1.EncryptedValue{"K": v1}, nil)
 	withVar := appconfig.ConfigHash(spec, s.envVarVersion("env1"))
 	if withVar == base {
 		t.Fatal("adding an env var must change the config hash")
 	}
 
-	v2, _ := sealer.Seal([]byte("two"))
+	v2, _ := vault.Seal([]byte("two"))
 	st.SetEnvVars("env1", map[string]*zatterav1.EncryptedValue{"K": v2}, nil)
 	changed := appconfig.ConfigHash(spec, s.envVarVersion("env1"))
 	if changed == withVar {

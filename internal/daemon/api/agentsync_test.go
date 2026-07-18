@@ -25,7 +25,7 @@ func (a leaderToggleApplier) IsLeader() bool                                  { 
 // node) is treated as the leader.
 func TestSyncServerNotLeader(t *testing.T) {
 	mk := func(a Applier) *SyncServer {
-		return NewSyncServer(state.New(), a, livestate.New(clock.NewFake()), clock.NewFake(), nil, nil)
+		return NewSyncServer(state.New(), a, livestate.New(clock.NewFake()), clock.NewFake(), nil, secrets.NewVault())
 	}
 	if mk(nil).notLeader() {
 		t.Fatal("nil applier must be treated as the leader")
@@ -43,7 +43,8 @@ func TestSyncServerNotLeader(t *testing.T) {
 // environment's env vars into the per-assignment runtime payload (T-15 step 3).
 func TestSyncServerRuntimePayload(t *testing.T) {
 	dataKey, _ := secrets.GenerateDataKey()
-	sealer, err := secrets.NewSealer(dataKey, 1)
+	kr, err := secrets.NewKeyring(dataKey, 1)
+	vault := mustVault(kr)
 	if err != nil {
 		t.Fatalf("new sealer: %v", err)
 	}
@@ -57,13 +58,13 @@ func TestSyncServerRuntimePayload(t *testing.T) {
 			Ports: []*zatterav1.PortSpec{{Name: "http", ContainerPort: 8080}},
 		},
 	})
-	sealed, err := sealer.Seal([]byte("s3cr3t"))
+	sealed, err := vault.Seal([]byte("s3cr3t"))
 	if err != nil {
 		t.Fatalf("seal: %v", err)
 	}
 	st.SetEnvVars("env1", map[string]*zatterav1.EncryptedValue{"TOKEN": sealed}, nil)
 
-	s := NewSyncServer(st, nil, livestate.New(clock.NewFake()), clock.NewFake(), nil, sealer)
+	s := NewSyncServer(st, nil, livestate.New(clock.NewFake()), clock.NewFake(), nil, vault)
 
 	rt := s.buildRuntime(&zatterav1.Assignment{
 		Meta:          &zatterav1.Meta{Id: "a1"},
@@ -94,7 +95,7 @@ func TestSyncServerRuntimePayload(t *testing.T) {
 
 	// Without a sealer, sealed user vars are omitted but image/spec resolve and
 	// platform vars (PORT) are still injected.
-	noSeal := NewSyncServer(st, nil, livestate.New(clock.NewFake()), clock.NewFake(), nil, nil)
+	noSeal := NewSyncServer(st, nil, livestate.New(clock.NewFake()), clock.NewFake(), nil, secrets.NewVault())
 	rt2 := noSeal.buildRuntime(&zatterav1.Assignment{Meta: &zatterav1.Meta{Id: "a1"}, ReleaseId: "rel1", EnvironmentId: "env1"})
 	if rt2 == nil || rt2.GetImageRef() == "" {
 		t.Fatal("image/spec should resolve without a sealer")
@@ -158,3 +159,21 @@ func (c *countingApplier) Apply(ctx context.Context, cmd *clusterv1.Command) err
 	return c.inner.Apply(ctx, cmd)
 }
 func (c *countingApplier) IsLeader() bool { return c.inner.IsLeader() }
+
+// mustVault wraps a keyring in an unsealed Vault for tests.
+func mustVault(kr *secrets.Keyring) *secrets.Vault {
+	v, err := secrets.NewUnsealedVault(kr)
+	if err != nil {
+		panic(err)
+	}
+	return v
+}
+
+// mustKeyring builds a keyring for tests.
+func mustKeyring(dataKey []byte, version uint32) *secrets.Keyring {
+	kr, err := secrets.NewKeyring(dataKey, version)
+	if err != nil {
+		panic(err)
+	}
+	return kr
+}

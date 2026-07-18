@@ -113,6 +113,16 @@ Cluster-wide backups (admin). See [Backup & disaster recovery](../data/backup-re
 | `zt backup ls` | List past backups and the current destination |
 | `zattera restore --from s3://BUCKET/PREFIX --passphrase-file FILE --data-dir DIR [--node-id ID] [--s3-endpoint URL] [--s3-region R] [--s3-access-key K] [--s3-secret-key S]` | Rebuild a fresh single-node cluster from the latest backup. Runs **on a server**, into an empty data dir; then start the node normally and let workers rejoin |
 
+## Sealing
+
+The cluster data key protects secrets at rest. Nodes normally recover it
+automatically at startup; this is the manual fallback. See
+[Sealing & unsealing](../operations/sealing).
+
+| Command | Description |
+| --- | --- |
+| `zt unseal --passphrase-file FILE` | Install the cluster data key on the node this context points at, using the recovery passphrase (admin). Per-node — the key is held in memory, so unseal each sealed node |
+
 ## Alerts
 
 Alert rules and notification channels. See [Metrics & alerts](../operations/metrics-and-alerts#metrics-alerts-alerts).

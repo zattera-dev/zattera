@@ -33,7 +33,8 @@ func testServer(t *testing.T) (addr string, caPEM []byte, adminToken string, rs 
 	auth := api.NewAuthenticator(st, rs, clk)
 	rbac := api.NewRBAC(st)
 	dataKey, _ := secrets.GenerateDataKey()
-	sealer, _ := secrets.NewSealer(dataKey, 1)
+	kr, _ := secrets.NewKeyring(dataKey, 1)
+	vault, _ := secrets.NewUnsealedVault(kr)
 
 	authority, err := ca.LoadOrCreate(t.TempDir())
 	if err != nil {
@@ -44,9 +45,9 @@ func testServer(t *testing.T) (addr string, caPEM []byte, adminToken string, rs 
 		Listen:         "127.0.0.1:0",
 		DNSNames:       []string{"localhost"},
 		IPs:            []net.IP{net.ParseIP("127.0.0.1")},
-		AuthService:    api.NewAuthServer(st, rs, clk, ""),
+		AuthService:    api.NewAuthServer(st, rs, clk, "", vault),
 		ProjectService: api.NewProjectServer(st, rs, clk, rbac),
-		AppService:     api.NewAppServer(st, rs, clk, sealer),
+		AppService:     api.NewAppServer(st, rs, clk, vault),
 		AuditService:   api.NewAuditor(st, rs, nil, 0),
 		UnaryInterceptors: []grpc.UnaryServerInterceptor{
 			auth.UnaryInterceptor, rbac.UnaryInterceptor,

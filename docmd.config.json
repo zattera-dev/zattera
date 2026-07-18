@@ -79,7 +79,8 @@
         { "title": "Access control & audit", "path": "/operations/access-control/", "icon": "lock" },
         { "title": "State export & apply", "path": "/operations/state-export/", "icon": "file-down" },
         { "title": "Upgrades", "path": "/operations/upgrades/", "icon": "arrow-up-circle" },
-        { "title": "Metrics & alerts", "path": "/operations/metrics-and-alerts/", "icon": "bar-chart" }
+        { "title": "Metrics & alerts", "path": "/operations/metrics-and-alerts/", "icon": "bar-chart" },
+        { "title": "Sealing & unsealing", "path": "/operations/sealing/", "icon": "lock" }
       ]
     },
     {
@@ -111,7 +112,9 @@
             { "title": "ADR-0001 · In-house OCI registry", "path": "/contributing/architecture-decision-records/0001-in-house-oci-registry/" },
             { "title": "ADR-0002 · Inverted build tags", "path": "/contributing/architecture-decision-records/0002-inverted-build-tags/" },
             { "title": "ADR-0003 · Mesh NAT traversal phasing", "path": "/contributing/architecture-decision-records/0003-mesh-nat-traversal-phasing/" },
-            { "title": "ADR-0004 · In-memory FSM state", "path": "/contributing/architecture-decision-records/0004-in-memory-fsm-state/" }
+            { "title": "ADR-0004 · In-memory FSM state", "path": "/contributing/architecture-decision-records/0004-in-memory-fsm-state/" },
+            { "title": "ADR-0005 · Registry blob locality", "path": "/contributing/architecture-decision-records/0005-registry-blob-locality/" },
+            { "title": "ADR-0006 · Auto-unseal on restart", "path": "/contributing/architecture-decision-records/0006-auto-unseal-on-restart/" }
           ]
         }
       ]

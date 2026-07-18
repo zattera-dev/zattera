@@ -22,6 +22,7 @@ import (
 	zatterav1 "github.com/zattera-dev/zattera/api/gen/zattera/v1"
 	"github.com/zattera-dev/zattera/internal/daemon/ca"
 	"github.com/zattera-dev/zattera/internal/daemon/raftstore"
+	"github.com/zattera-dev/zattera/internal/daemon/secrets"
 	"github.com/zattera-dev/zattera/internal/pkgutil/clock"
 	"github.com/zattera-dev/zattera/internal/pkgutil/ids"
 )
@@ -41,7 +42,7 @@ func newAuthHarness(t *testing.T) *authHarness {
 	rs := raftstore.NewTestStore(t)
 	clk := clock.Real{}
 	auth := NewAuthenticator(rs.State(), rs, clk)
-	authSrv := NewAuthServer(rs.State(), rs, clk, "")
+	authSrv := NewAuthServer(rs.State(), rs, clk, "", secrets.NewVault())
 
 	authority, err := ca.LoadOrCreate(t.TempDir())
 	if err != nil {

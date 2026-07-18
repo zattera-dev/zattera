@@ -201,8 +201,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 	// Barrier first so a freshly elected leader has applied the persisted log
 	// (the org entry) before the idempotency check — otherwise a restart would
 	// reprint the token.
-	var sealer secrets.Sealer
-	var keyring *secrets.Keyring
+	vault := secrets.NewVault()
 	var bootToken, bootPassphrase string
 	if rs.IsLeader() {
 		if err := rs.Barrier(ctx); err != nil {
@@ -220,15 +219,22 @@ func Run(ctx context.Context, cfg config.Config) error {
 		if err != nil {
 			return err
 		}
-		keyring = kr
-		if keyring != nil {
-			if sealer, err = keyring.Sealer(); err != nil {
+		// kr is nil on every boot after the first: Bootstrap is idempotent and
+		// only mints a keyring when it actually initializes the cluster. That is
+		// why a restart comes up sealed and needs the recovery below (T-111).
+		if kr != nil {
+			if err := vault.Install(kr); err != nil {
 				return err
 			}
 		}
 		bootToken, bootPassphrase = bootstrapSecrets(bootOut.String())
 	}
-	// TODO(T-3x): unseal-on-restart so followers/restarts recover the sealer.
+
+	// Unseal-on-restart (T-111/T-112): a node that did not just bootstrap holds
+	// no data key. Try to recover it before serving, then report the outcome
+	// loudly — a silently sealed cluster stops alerting, env writes and backups
+	// with no signal at all.
+	autoUnseal(ctx, cfg, rs, authority, nodeID, vault, log)
 
 	// Cluster CA fingerprint (T-90): operators pin it with `zattera login
 	// --ca-pin` (trust-on-first-use) so no CA file is needed out of band.
@@ -252,7 +258,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 		}
 	}
 
-	return runControlPlane(ctx, cfg, rs, nodeID, meshIP, authority, sealer, keyring, controlMesh, nil, log)
+	return runControlPlane(ctx, cfg, rs, nodeID, meshIP, authority, vault, controlMesh, nil, log)
 }
 
 // runControlPlane wires and runs the full control-plane stack — API server,
@@ -266,7 +272,7 @@ func Run(ctx context.Context, cfg config.Config) error {
 // sync. joinRegAuth, when non-nil, is the registry credential a joined control
 // node received at join — its co-located agent uses it to push/pull cluster
 // images instead of the leader-minted self credential (T-55c).
-func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store, nodeID, meshIP string, authority *ca.CA, sealer secrets.Sealer, keyring *secrets.Keyring, controlMesh *mesh.DeviceManager, joinRegAuth *crt.RegistryAuth, log *slog.Logger) error {
+func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store, nodeID, meshIP string, authority *ca.CA, vault *secrets.Vault, controlMesh *mesh.DeviceManager, joinRegAuth *crt.RegistryAuth, log *slog.Logger) error {
 	st := rs.State()
 
 	// hostIP is THIS node's address for publishing container ports, advertising
@@ -301,7 +307,7 @@ func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store
 	// Leader-memory livestate (T-14): agent presence, heartbeats and live
 	// samples. Rebuilt from the agent streams on every election; never in Raft.
 	live := livestate.New(clk)
-	syncSrv := api.NewSyncServer(st, rs, live, clk, log, sealer)
+	syncSrv := api.NewSyncServer(st, rs, live, clk, log, vault)
 
 	// Join service (T-17): token-authenticated node enrollment. In dev (mesh
 	// disabled) joined nodes reach the control plane over loopback.
@@ -313,7 +319,7 @@ func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store
 	if raftPort == "" {
 		raftPort = "7480"
 	}
-	joinSrv := api.NewJoinServer(st, rs, clk, authority, keyring, api.JoinConfig{
+	joinSrv := api.NewJoinServer(st, rs, clk, authority, vault, api.JoinConfig{
 		MeshEnabled:     !cfg.Mesh.Disabled,
 		ControlGRPCAddr: net.JoinHostPort(hostIP, apiPort),
 		RegistryAddr:    registryClientAddr(cfg),
@@ -418,15 +424,26 @@ func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store
 	// CRUD but returns FailedPrecondition for snapshot ops.
 	volumeSrv := api.NewVolumeServer(st, rs, api.GRPCVolumeAgentDialer{Connect: agentLocalConnect}, clk, log)
 	volumeSrv.SetFileDialer(api.GRPCVolumeFileDialer{Connect: agentLocalConnect})
-	var snapDispatcher *api.SnapshotDispatcher
-	var backupSrv zatterav1.BackupServiceServer // nil interface on a sealed node
-	if sealer != nil && keyring != nil {
-		snapDispatcher = api.NewSnapshotDispatcher(st, rs, sealer, keyring.DataKey(), agentLocalConnect, clk, log)
-		volumeSrv.WithSnapshots(snapDispatcher)
-		backupSrv = api.NewBackupServer(st, rs, sealer, authority, clk)
-	}
+	// Constructed unconditionally: the vault reports FailedPrecondition while
+	// sealed and starts working the moment it is unsealed, so a restarted node
+	// no longer needs a second restart to get snapshots and backups back.
+	snapDispatcher := api.NewSnapshotDispatcher(st, rs, vault, agentLocalConnect, clk, log)
+	volumeSrv.WithSnapshots(snapDispatcher)
+	backupSrv := api.NewBackupServer(st, rs, vault, authority, clk)
 
-	githubWebhook, previews := api.NewGitHubWebhook(st, rs, sealer, clk, cfg.Domain, log)
+	githubWebhook, previews := api.NewGitHubWebhook(st, rs, vault, clk, cfg.Domain, log)
+
+	// Unseal (T-111): an operator installs the data key on THIS node with the
+	// recovery passphrase; caching it means the next restart is automatic.
+	authSrv := api.NewAuthServer(st, rs, clk, cfg.Domain, vault)
+	authSrv.SetUnsealHook(func() {
+		log.Info("cluster key unsealed by an operator")
+		persistDataKey(cfg, vault, log)
+	})
+
+	// KeyService (T-112): hands the data key to a control peer that restarted
+	// sealed. mTLS + control-role gated.
+	keySrv := api.NewKeyServer(st, vault, log)
 
 	// Cluster upgrade (T-95): the control plane resolves release artifacts and
 	// dials each node's agent to swap its binary.
@@ -442,9 +459,9 @@ func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store
 		Logger:            log,
 		DNSNames:          serverDNSNames(cfg),
 		IPs:               serverIPs(meshIP),
-		AuthService:       api.NewAuthServer(st, rs, clk, cfg.Domain),
+		AuthService:       authSrv,
 		ProjectService:    api.NewProjectServer(st, rs, clk, rbac),
-		AppService:        api.NewAppServer(st, rs, clk, sealer),
+		AppService:        api.NewAppServer(st, rs, clk, vault),
 		PublicHostname:    apiPubHost,
 		PublicCertificate: apiPubCert,
 		DeployService:     deploySrv,
@@ -457,9 +474,10 @@ func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store
 		JobService:        api.NewJobServer(st, rs, clk),
 		VolumeService:     volumeSrv,
 		BackupService:     backupSrv,
-		AlertService:      api.NewAlertServer(st, rs, sealer, clk),
+		AlertService:      api.NewAlertServer(st, rs, vault, clk),
 		AgentSyncService:  syncSrv,
 		JoinService:       joinSrv,
+		KeyService:        keySrv,
 		MeshService:       api.NewMeshServer(st, rs, clk, log),
 		RouteService:      api.NewRouteServer(routeBuilder),
 		ActivatorService:  activatorSrv,
@@ -525,18 +543,19 @@ func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store
 
 	// Alert engine (T-74): the leader evaluates alert rules against live metrics
 	// and events and delivers notifications. Needs the data key to unseal channel
-	// secrets, so it runs only on an unsealed node.
-	if sealer != nil {
-		alertEngine := notify.NewEngine(notify.Config{
-			Store: st, Metrics: liveMetrics{live: live}, Opener: sealer, Clock: clk, Logger: log,
-			EmitEvent: raftEventEmitter(rs, clk, log, "system:alerts"),
-		})
-		go runAlertEngine(ctx, rs, alertEngine, clk)
-	}
+	// secrets. It runs regardless: while sealed, rule evaluation still happens
+	// and only delivery fails, and it recovers on unseal without a restart —
+	// previously a sealed node skipped the engine entirely and stayed silent
+	// even after being unsealed (T-111).
+	alertEngine := notify.NewEngine(notify.Config{
+		Store: st, Metrics: liveMetrics{live: live}, Opener: vault, Clock: clk, Logger: log,
+		EmitEvent: raftEventEmitter(rs, clk, log, "system:alerts"),
+	})
+	go runAlertEngine(ctx, rs, alertEngine, clk)
 
 	// Scheduled volume snapshots (T-65): the leader fires SnapshotPolicy.schedule
 	// snapshots and enforces keep_last. Only when snapshots are available.
-	if snapDispatcher != nil {
+	{
 		go scheduler.NewSnapshotScheduler(rs, snapDispatcher, clk, log).Run(ctx)
 	}
 
@@ -560,7 +579,7 @@ func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store
 	// Audit/event archive (T-92): when backup.archive is on, the leader copies
 	// both rings to the backup destination before they age out, and the query
 	// path can read them back. No-op while archiving is off.
-	go runArchiver(ctx, rs, auditor, sealer, clk, log)
+	go runArchiver(ctx, rs, auditor, vault, clk, log)
 
 	// Build dispatcher (T-35/T-54): the leader assigns QUEUED builds to builder
 	// nodes over their AgentLocalService and records the outcome. Leader-gated.
@@ -944,7 +963,7 @@ func runJoinedControl(ctx context.Context, cfg config.Config, jr *joinResult, lo
 	if err != nil {
 		return fmt.Errorf("daemon: keyring from handover: %w", err)
 	}
-	sealer, err := keyring.Sealer()
+	vault, err := secrets.NewUnsealedVault(keyring)
 	if err != nil {
 		return err
 	}
@@ -985,7 +1004,7 @@ func runJoinedControl(ctx context.Context, cfg config.Config, jr *joinResult, lo
 		joinRegAuth = &crt.RegistryAuth{Username: jr.RegistryUser, Password: jr.RegistryPass, ServerAddress: jr.RegistryAddr}
 	}
 
-	return runControlPlane(ctx, cfg, rs, jr.NodeID, jr.MeshIP, authority, sealer, keyring, controlMesh, joinRegAuth, log)
+	return runControlPlane(ctx, cfg, rs, jr.NodeID, jr.MeshIP, authority, vault, controlMesh, joinRegAuth, log)
 }
 
 // raftPortOf returns the raft transport port from config (default 7480).

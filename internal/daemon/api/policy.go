@@ -11,6 +11,7 @@ var methodAuth = map[string]Requirement{
 	// --- AuthService ---
 	"/zattera.v1.AuthService/Login":       reqPublic,
 	"/zattera.v1.AuthService/WhoAmI":      reqUser,
+	"/zattera.v1.AuthService/Unseal":      reqAdmin,
 	"/zattera.v1.AuthService/CreateToken": reqUser,
 	"/zattera.v1.AuthService/ListTokens":  reqUser,
 	"/zattera.v1.AuthService/RevokeToken": reqUser,
@@ -125,4 +126,9 @@ var methodAuth = map[string]Requirement{
 	// JoinService.Join is intentionally reqPublic: the join token IS the auth
 	// (T-17), verified inside the handler.
 	"/zattera.cluster.v1.JoinService/Join": reqPublic,
+
+	// KeyService hands the cluster data key to an already-enrolled node, so it
+	// requires a cluster-signed node cert (reqNode). The handler further
+	// restricts it to nodes holding the control role.
+	"/zattera.cluster.v1.KeyService/FetchDataKey": reqNode,
 }

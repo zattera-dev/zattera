@@ -27,16 +27,18 @@ const archiveSweepTick = 5 * time.Minute
 // archiveDest resolves the archive destination from the cluster's backup
 // config. It returns false when archiving is switched off, no bucket is set,
 // or the node is sealed — all normal states, not errors.
-func archiveDest(rs *raftstore.Store, sealer secrets.Sealer) func() (volumes.ObjectStore, bool) {
+func archiveDest(rs *raftstore.Store, vault *secrets.Vault) func() (volumes.ObjectStore, bool) {
 	return func() (volumes.ObjectStore, bool) {
-		if sealer == nil {
+		// Re-checked per sweep rather than captured at startup, so archiving
+		// resumes on its own after a late unseal (T-111).
+		if !vault.Unsealed() {
 			return nil, false
 		}
 		cfg, ok := rs.State().BackupConfig()
 		if !ok || !cfg.GetArchive() || cfg.GetS3Bucket() == "" {
 			return nil, false
 		}
-		store, err := api.ObjectStoreFor(cfg, sealer)
+		store, err := api.ObjectStoreFor(cfg, vault)
 		if err != nil {
 			return nil, false
 		}
@@ -64,8 +66,8 @@ func (c archiveCursors) PutCursor(ctx context.Context, key string, value []byte)
 // runArchiver sweeps audit entries and events out to object storage on the
 // leader (T-92). Reading them back is a query-time concern; see
 // Auditor.SetArchive.
-func runArchiver(ctx context.Context, rs *raftstore.Store, auditor *api.Auditor, sealer secrets.Sealer, clk clock.Clock, log *slog.Logger) {
-	dest := archiveDest(rs, sealer)
+func runArchiver(ctx context.Context, rs *raftstore.Store, auditor *api.Auditor, vault *secrets.Vault, clk clock.Clock, log *slog.Logger) {
+	dest := archiveDest(rs, vault)
 
 	// The query path reads the archive from any control node, leader or not.
 	auditor.SetArchive(func() (*archive.Reader, bool) {
@@ -73,10 +75,10 @@ func runArchiver(ctx context.Context, rs *raftstore.Store, auditor *api.Auditor,
 		if !ok {
 			return nil, false
 		}
-		return archive.NewReader(store, sealer), true
+		return archive.NewReader(store, vault), true
 	})
 
-	arch := archive.New(rs.State(), archiveCursors{rs: rs, clk: clk}, sealer, dest, clk, log)
+	arch := archive.New(rs.State(), archiveCursors{rs: rs, clk: clk}, vault, dest, clk, log)
 	leaderrunner.Run(ctx, rs, clk, func(ctx context.Context) {
 		tick := clk.NewTicker(archiveSweepTick)
 		defer tick.Stop()

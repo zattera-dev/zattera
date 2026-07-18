@@ -327,7 +327,7 @@ func newJoinHarness(t *testing.T, mesh bool) *joinHarness {
 		t.Fatalf("keyring: %v", err)
 	}
 	return &joinHarness{
-		srv: NewJoinServer(rs.State(), rs, clk, authority, keyring, cfg, nil),
+		srv: NewJoinServer(rs.State(), rs, clk, authority, mustVault(keyring), cfg, nil),
 		rs:  rs,
 		ca:  authority,
 		clk: clk,

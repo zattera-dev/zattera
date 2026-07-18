@@ -23,12 +23,12 @@ func seedProjectTree(t *testing.T) (*raftstore.Store, secrets.Sealer) {
 	t.Helper()
 	rs := raftstore.NewTestStore(t)
 	dataKey, _ := secrets.GenerateDataKey()
-	sealer, _ := secrets.NewSealer(dataKey, 1)
+	vault := mustVault(mustKeyring(dataKey, 1))
 
 	pid := ids.New()
 	appID := ids.New()
 	prodID := ids.New()
-	sealed, _ := sealer.Seal([]byte("s3cret"))
+	sealed, _ := vault.Seal([]byte("s3cret"))
 	cmds := []*clusterv1.Command{
 		{Mutation: &clusterv1.Command_PutOrg{PutOrg: &clusterv1.PutOrg{Org: &zatterav1.Org{Meta: metaID(ids.New()), Name: "default"}}}},
 		{Mutation: &clusterv1.Command_PutProject{PutProject: &clusterv1.PutProject{Project: &zatterav1.Project{Meta: metaID(pid), Name: "demo"}}}},
@@ -43,7 +43,7 @@ func seedProjectTree(t *testing.T) (*raftstore.Store, secrets.Sealer) {
 			t.Fatalf("seed: %v", err)
 		}
 	}
-	return rs, sealer
+	return rs, vault
 }
 
 func metaID(id string) *zatterav1.Meta {
@@ -51,7 +51,7 @@ func metaID(id string) *zatterav1.Meta {
 }
 
 func TestStateRoundTrip(t *testing.T) {
-	src, sealer := seedProjectTree(t)
+	src, vault := seedProjectTree(t)
 	srcSrv := NewStateServer(src.State(), src, clock.Real{})
 
 	doc, err := srcSrv.buildDocument("")
@@ -93,8 +93,8 @@ func TestStateRoundTrip(t *testing.T) {
 	if len(got) != 1 || !proto.Equal(got["API_KEY"], want["API_KEY"]) {
 		t.Fatalf("env var not round-tripped: got %+v want %+v", got, want)
 	}
-	// And it still decrypts with the original sealer.
-	pt, err := sealer.Open(got["API_KEY"])
+	// And it still decrypts with the original vault.
+	pt, err := vault.Open(got["API_KEY"])
 	if err != nil || string(pt) != "s3cret" {
 		t.Fatalf("sealed value corrupted: %q %v", pt, err)
 	}

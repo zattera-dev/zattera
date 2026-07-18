@@ -14,6 +14,7 @@ import (
 	zatterav1 "github.com/zattera-dev/zattera/api/gen/zattera/v1"
 	"github.com/zattera-dev/zattera/internal/daemon/ca"
 	"github.com/zattera-dev/zattera/internal/daemon/raftstore"
+	"github.com/zattera-dev/zattera/internal/daemon/secrets"
 	"github.com/zattera-dev/zattera/internal/pkgutil/clock"
 	"github.com/zattera-dev/zattera/internal/pkgutil/ids"
 )
@@ -61,7 +62,7 @@ func TestAudit(t *testing.T) {
 		Listen:         "127.0.0.1:0",
 		DNSNames:       []string{"localhost"},
 		IPs:            []net.IP{net.ParseIP("127.0.0.1")},
-		AuthService:    NewAuthServer(st, rs, clk, ""),
+		AuthService:    NewAuthServer(st, rs, clk, "", secrets.NewVault()),
 		ProjectService: NewProjectServer(st, rs, clk, rbac),
 		AuditService:   audit,
 		UnaryInterceptors: []grpc.UnaryServerInterceptor{

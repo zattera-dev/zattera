@@ -17,8 +17,8 @@ func newAlertSrv(t *testing.T) (*AlertServer, context.Context) {
 	t.Helper()
 	rs := raftstore.NewTestStore(t)
 	dataKey, _ := secrets.GenerateDataKey()
-	sealer, _ := secrets.NewSealer(dataKey, 1)
-	srv := NewAlertServer(rs.State(), rs, sealer, clock.NewFake())
+	vault := mustVault(mustKeyring(dataKey, 1))
+	srv := NewAlertServer(rs.State(), rs, vault, clock.NewFake())
 	return srv, withIdentity(context.Background(), Identity{UserID: "u1"})
 }
 

@@ -50,23 +50,25 @@ type voter interface {
 // in the handler.
 type JoinServer struct {
 	clusterv1.UnimplementedJoinServiceServer
-	store   *state.Store
-	raft    Applier
-	clock   clock.Clock
-	ca      *ca.CA
-	keyring *secrets.Keyring
-	cfg     JoinConfig
-	log     *slog.Logger
+	store *state.Store
+	raft  Applier
+	clock clock.Clock
+	ca    *ca.CA
+	vault *secrets.Vault
+	cfg   JoinConfig
+	log   *slog.Logger
 }
 
-// NewJoinServer builds the join service. keyring is the cluster data key (may be
-// nil on a node that never bootstrapped/unsealed); it is handed to joining
-// control nodes so they come up already unsealed (T-55).
-func NewJoinServer(store *state.Store, raft Applier, clk clock.Clock, authority *ca.CA, keyring *secrets.Keyring, cfg JoinConfig, log *slog.Logger) *JoinServer {
+// NewJoinServer builds the join service. vault holds the cluster data key (it
+// is sealed on a node that never bootstrapped and has not been unsealed); the
+// key is handed to joining control nodes so they come up already unsealed
+// (T-55). Reading it through the vault rather than a captured keyring means a
+// node unsealed after startup can serve joins without a restart (T-111).
+func NewJoinServer(store *state.Store, raft Applier, clk clock.Clock, authority *ca.CA, vault *secrets.Vault, cfg JoinConfig, log *slog.Logger) *JoinServer {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &JoinServer{store: store, raft: raft, clock: clk, ca: authority, keyring: keyring, cfg: cfg, log: log}
+	return &JoinServer{store: store, raft: raft, clock: clk, ca: authority, vault: vault, cfg: cfg, log: log}
 }
 
 // Join enrolls a node: it verifies + consumes the token, allocates a mesh IP,
@@ -185,13 +187,13 @@ func (s *JoinServer) handoverControl(nodeID, meshIP string, resp *clusterv1.Join
 	if err != nil {
 		return status.Errorf(codes.Internal, "export ca key: %v", err)
 	}
-	if s.keyring == nil {
+	if !s.vault.Unsealed() {
 		// Without the data key the new control node cannot decrypt secrets; this
-		// means the handling node itself is not unsealed — a config/ordering bug.
+		// means the handling node itself is not unsealed — unseal it first.
 		return status.Error(codes.FailedPrecondition, "cluster is not unsealed; cannot hand a data key to a joining control node")
 	}
-	resp.DataKey = s.keyring.DataKey()
-	resp.DataKeyVersion = s.keyring.KeyVersion()
+	resp.DataKey = s.vault.DataKey()
+	resp.DataKeyVersion = s.vault.KeyVersion()
 	resp.CaKeyPem = caKeyPEM
 	resp.RaftBindAddr = net.JoinHostPort(meshIP, s.cfg.RaftPort)
 

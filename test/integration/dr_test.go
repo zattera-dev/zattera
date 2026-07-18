@@ -48,7 +48,8 @@ func TestDisasterRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	dataKey, _ := secrets.GenerateDataKey()
-	sealer, _ := secrets.NewSealer(dataKey, 1)
+	kr, _ := secrets.NewKeyring(dataKey, 1)
+	vault, _ := secrets.NewUnsealedVault(kr)
 
 	// A real volume snapshot in the object store (so "restorable" is meaningful).
 	eng, _ := volumes.NewEngine(store, dataKey, volumes.Options{AverageSize: 8 << 10})
@@ -77,7 +78,7 @@ func TestDisasterRecovery(t *testing.T) {
 	})
 
 	// Configure the destination and run a full backup through the wired service.
-	srv := api.NewBackupServer(st, rs, sealer, drCA{}, clock.Real{})
+	srv := api.NewBackupServer(st, rs, vault, drCA{}, clock.Real{})
 	if _, err := srv.SetBackupConfig(ctx, &zatterav1.SetBackupConfigRequest{
 		Config:           &zatterav1.BackupConfig{S3Endpoint: "http://" + endpoint, S3Bucket: minioBucket, S3Prefix: "dr/", S3Region: "us-east-1"},
 		S3AccessKeyPlain: minioAccess,

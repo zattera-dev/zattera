@@ -46,6 +46,7 @@ email = "ops@example.com"
 | `roles` | `["control", "worker"]` | Any of `control`, `worker` |
 | `domain` | — | Cluster app domain; apps are served at `<app>-<env>.<domain>` |
 | `dev` | `false` | Single-node developer mode (see [dev mode](#configuration-dev-mode-defaults)) |
+| `sealed_at_rest` | `false` | Never cache the cluster data key on local disk. The node cannot auto-unseal after a restart — see [Sealing & unsealing](../operations/sealing) |
 
 ### `[api]`
 

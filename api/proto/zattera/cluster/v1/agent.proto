@@ -386,3 +386,26 @@ message AgentWriteFileHeader {
 message AgentWriteFileResponse {
   uint64 bytes_written = 1;
 }
+
+// ---------------------------------------------------------------------------
+// Cluster key handover to an already-enrolled node (T-112)
+// ---------------------------------------------------------------------------
+
+// KeyService hands the cluster data key to a control node that restarted
+// sealed. Unlike JoinService this is mTLS node-authenticated and free of side
+// effects: a join token is single-use and joining mints certs, mesh IPs and
+// registry credentials that must not repeat on every reboot.
+//
+// The caller's node certificate is the credential; the server additionally
+// requires that node to hold the control role, so a compromised worker cert
+// cannot pull the key.
+service KeyService {
+  rpc FetchDataKey(FetchDataKeyRequest) returns (FetchDataKeyResponse);
+}
+
+message FetchDataKeyRequest {}
+
+message FetchDataKeyResponse {
+  bytes data_key = 1;         // plaintext cluster data key
+  uint32 data_key_version = 2;
+}

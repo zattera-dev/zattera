@@ -45,7 +45,7 @@ func TestRestoreRefusesWhileMounted(t *testing.T) {
 	// A running instance on the volume's node makes it mounted.
 	st.PutAssignment(&zatterav1.Assignment{Meta: &zatterav1.Meta{Id: "a1"}, EnvironmentId: "e1", NodeId: "n1", Desired: zatterav1.AssignmentDesired_ASSIGNMENT_DESIRED_RUN})
 
-	disp := NewSnapshotDispatcher(st, rs, nil, []byte("k"), failConnect, clock.NewFake(), nil)
+	disp := NewSnapshotDispatcher(st, rs, secrets.NewVault(), failConnect, clock.NewFake(), nil)
 	srv := NewVolumeServer(st, rs, nil, clock.NewFake(), nil).WithSnapshots(disp)
 	ctx := withIdentity(context.Background(), Identity{UserID: "u1"})
 
@@ -58,15 +58,16 @@ func TestRestoreRefusesWhileMounted(t *testing.T) {
 func TestSnapshotDispatcherS3Target(t *testing.T) {
 	st := state.New()
 	dataKey, _ := secrets.GenerateDataKey()
-	sealer, _ := secrets.NewSealer(dataKey, 1)
-	ak, _ := sealer.Seal([]byte("AKIA"))
-	sk, _ := sealer.Seal([]byte("secret"))
+	kr, _ := secrets.NewKeyring(dataKey, 1)
+	vault, _ := secrets.NewUnsealedVault(kr)
+	ak, _ := vault.Seal([]byte("AKIA"))
+	sk, _ := vault.Seal([]byte("secret"))
 	st.SetBackupConfig(&zatterav1.BackupConfig{
 		S3Endpoint: "s3.example.com", S3Bucket: "backups", S3Prefix: "z/", S3Region: "eu",
 		S3AccessKey: ak, S3SecretKey: sk,
 	})
 
-	d := NewSnapshotDispatcher(st, nil, sealer, dataKey, failConnect, clock.NewFake(), nil)
+	d := NewSnapshotDispatcher(st, nil, vault, failConnect, clock.NewFake(), nil)
 	target, err := d.s3Target()
 	if err != nil {
 		t.Fatalf("s3Target: %v", err)
@@ -79,7 +80,7 @@ func TestSnapshotDispatcherS3Target(t *testing.T) {
 	}
 
 	// No backup config → a clear error.
-	d2 := NewSnapshotDispatcher(state.New(), nil, sealer, dataKey, failConnect, clock.NewFake(), nil)
+	d2 := NewSnapshotDispatcher(state.New(), nil, vault, failConnect, clock.NewFake(), nil)
 	if _, err := d2.s3Target(); err == nil {
 		t.Fatal("expected an error without a backup destination")
 	}

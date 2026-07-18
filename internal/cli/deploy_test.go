@@ -39,7 +39,8 @@ func deployHarness(t *testing.T) (addr string, caPEM []byte, adminToken string) 
 	authn := api.NewAuthenticator(st, rs, clk)
 	rbac := api.NewRBAC(st)
 	dataKey, _ := secrets.GenerateDataKey()
-	sealer, _ := secrets.NewSealer(dataKey, 1)
+	kr, _ := secrets.NewKeyring(dataKey, 1)
+	vault, _ := secrets.NewUnsealedVault(kr)
 	authority, err := ca.LoadOrCreate(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -51,9 +52,9 @@ func deployHarness(t *testing.T) (addr string, caPEM []byte, adminToken string) 
 		DNSNames:       []string{"localhost"},
 		IPs:            []net.IP{net.ParseIP("127.0.0.1")},
 		Logger:         log,
-		AuthService:    api.NewAuthServer(st, rs, clk, ""),
+		AuthService:    api.NewAuthServer(st, rs, clk, "", vault),
 		ProjectService: api.NewProjectServer(st, rs, clk, rbac),
-		AppService:     api.NewAppServer(st, rs, clk, sealer),
+		AppService:     api.NewAppServer(st, rs, clk, vault),
 		DeployService:  api.NewDeployServer(st, rs, clk, t.TempDir()),
 		NodeService:    api.NewNodeServer(st, rs, clk, authority),
 		UnaryInterceptors: []grpc.UnaryServerInterceptor{

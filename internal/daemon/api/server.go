@@ -65,6 +65,9 @@ type Options struct {
 	AgentSyncService clusterv1.AgentSyncServiceServer
 	// JoinService is token-authenticated (no mTLS), no REST gateway.
 	JoinService clusterv1.JoinServiceServer
+	// KeyService hands the cluster data key to an enrolled control node that
+	// restarted sealed (T-112). mTLS node-authenticated, no REST gateway.
+	KeyService clusterv1.KeyServiceServer
 	// MeshService distributes WireGuard peer sets (mTLS node identity).
 	MeshService clusterv1.MeshServiceServer
 	// RouteService streams route snapshots to node proxies (mTLS node identity).
@@ -313,6 +316,9 @@ func registerGRPC(s *grpc.Server, opts Options) {
 	}
 	if opts.JoinService != nil {
 		clusterv1.RegisterJoinServiceServer(s, opts.JoinService)
+	}
+	if opts.KeyService != nil {
+		clusterv1.RegisterKeyServiceServer(s, opts.KeyService)
 	}
 	if opts.MeshService != nil {
 		clusterv1.RegisterMeshServiceServer(s, opts.MeshService)

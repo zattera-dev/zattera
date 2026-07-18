@@ -51,6 +51,7 @@ func Commands() []*cobra.Command {
 		newVolumesCmd(),
 		newBackupCmd(),
 		newAlertsCmd(), newAuditCmd(), newEventsCmd(), newClusterCmd(),
+		newUnsealCmd(),
 	}
 	for _, c := range cmds {
 		c.PersistentFlags().BoolVar(&jsonFlag, "json", false, "machine-readable output")

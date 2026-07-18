@@ -21,16 +21,16 @@ import (
 // AppServer implements zatterav1.AppServiceServer.
 type AppServer struct {
 	zatterav1.UnimplementedAppServiceServer
-	store  *state.Store
-	raft   Applier
-	clock  clock.Clock
-	sealer secrets.Sealer // may be nil until the cluster key is unsealed
+	store *state.Store
+	raft  Applier
+	clock clock.Clock
+	vault *secrets.Vault // sealed until the cluster key is available
 }
 
 // NewAppServer builds the app service. sealer may be nil; env-var mutations then
 // return FailedPrecondition.
-func NewAppServer(store *state.Store, raft Applier, clk clock.Clock, sealer secrets.Sealer) *AppServer {
-	return &AppServer{store: store, raft: raft, clock: clk, sealer: sealer}
+func NewAppServer(store *state.Store, raft Applier, clk clock.Clock, vault *secrets.Vault) *AppServer {
+	return &AppServer{store: store, raft: raft, clock: clk, vault: vault}
 }
 
 // CreateApp creates an app and its default production + staging environments.
@@ -190,12 +190,12 @@ func (s *AppServer) SetEnvVars(ctx context.Context, req *zatterav1.SetEnvVarsReq
 	if err != nil {
 		return nil, err
 	}
-	if len(req.GetSet()) > 0 && s.sealer == nil {
+	if len(req.GetSet()) > 0 && !s.vault.Unsealed() {
 		return nil, status.Error(codes.FailedPrecondition, "cluster key is not unsealed; cannot store secrets")
 	}
 	set := make(map[string]*zatterav1.EncryptedValue, len(req.GetSet()))
 	for k, v := range req.GetSet() {
-		sealed, err := s.sealer.Seal([]byte(v))
+		sealed, err := s.vault.Seal([]byte(v))
 		if err != nil {
 			return nil, status.Error(codes.Internal, "sealing failed")
 		}
@@ -227,10 +227,10 @@ func (s *AppServer) GetEnvVars(_ context.Context, req *zatterav1.GetEnvVarsReque
 			out[k] = ""
 			continue
 		}
-		if s.sealer == nil {
+		if !s.vault.Unsealed() {
 			return nil, status.Error(codes.FailedPrecondition, "cluster key is not unsealed; cannot reveal secrets")
 		}
-		pt, err := s.sealer.Open(v)
+		pt, err := s.vault.Open(v)
 		if err != nil {
 			return nil, status.Error(codes.Internal, "unsealing failed")
 		}

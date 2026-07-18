@@ -22,19 +22,19 @@ import (
 // secrets are sealed here; list responses redact them.
 type AlertServer struct {
 	zatterav1.UnimplementedAlertServiceServer
-	store  *state.Store
-	raft   Applier
-	sealer secrets.Sealer
-	clock  clock.Clock
+	store *state.Store
+	raft  Applier
+	vault *secrets.Vault
+	clock clock.Clock
 }
 
 // NewAlertServer builds the alert service. sealer may be nil on a sealed node
 // (channel writes that carry secrets then fail with FailedPrecondition).
-func NewAlertServer(store *state.Store, raft Applier, sealer secrets.Sealer, clk clock.Clock) *AlertServer {
+func NewAlertServer(store *state.Store, raft Applier, vault *secrets.Vault, clk clock.Clock) *AlertServer {
 	if clk == nil {
 		clk = clock.Real{}
 	}
-	return &AlertServer{store: store, raft: raft, sealer: sealer, clock: clk}
+	return &AlertServer{store: store, raft: raft, vault: vault, clock: clk}
 }
 
 // PutRule creates or updates an alert rule.
@@ -149,10 +149,10 @@ func (s *AlertServer) sealChannelSecrets(ch, prev *zatterav1.NotificationChannel
 		if plain == "" {
 			return prior, nil // keep whatever was already stored
 		}
-		if s.sealer == nil {
+		if !s.vault.Unsealed() {
 			return nil, status.Error(codes.FailedPrecondition, "cluster key is not unsealed; cannot store channel secrets")
 		}
-		return s.sealer.Seal([]byte(plain))
+		return s.vault.Seal([]byte(plain))
 	}
 
 	switch ch.GetType() {

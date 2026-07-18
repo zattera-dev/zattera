@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -33,12 +34,20 @@ type AuthServer struct {
 	raft          Applier
 	clock         clock.Clock
 	clusterDomain string // cfg.Domain; surfaced via WhoAmI for app-URL construction
+	vault         *secrets.Vault
+	// onUnseal, when set, persists the recovered key so the next restart is
+	// automatic. Nil when the operator chose sealed-at-rest.
+	onUnseal func()
 }
 
-// NewAuthServer builds the auth service. clusterDomain is cfg.Domain.
-func NewAuthServer(store *state.Store, raft Applier, clk clock.Clock, clusterDomain string) *AuthServer {
-	return &AuthServer{store: store, raft: raft, clock: clk, clusterDomain: clusterDomain}
+// NewAuthServer builds the auth service. clusterDomain is cfg.Domain; vault is
+// this node's cluster key holder, which Unseal installs into.
+func NewAuthServer(store *state.Store, raft Applier, clk clock.Clock, clusterDomain string, vault *secrets.Vault) *AuthServer {
+	return &AuthServer{store: store, raft: raft, clock: clk, clusterDomain: clusterDomain, vault: vault}
 }
+
+// SetUnsealHook registers a callback run after a successful Unseal.
+func (s *AuthServer) SetUnsealHook(fn func()) { s.onUnseal = fn }
 
 // Login exchanges email+password for a short-lived session token.
 func (s *AuthServer) Login(ctx context.Context, req *zatterav1.LoginRequest) (*zatterav1.LoginResponse, error) {
@@ -79,7 +88,34 @@ func (s *AuthServer) WhoAmI(ctx context.Context, _ *emptypb.Empty) (*zatterav1.W
 		User:          redactUser(user),
 		Memberships:   s.store.ListMembershipsOfUser(id.UserID),
 		ClusterDomain: s.clusterDomain,
+		Sealed:        !s.vault.Unsealed(),
 	}, nil
+}
+
+// Unseal installs the cluster data key on this node from the recovery
+// passphrase (T-111). It is per-node: each sealed node must be unsealed, since
+// the key lives in process memory and is never replicated.
+func (s *AuthServer) Unseal(_ context.Context, req *zatterav1.UnsealRequest) (*zatterav1.UnsealResponse, error) {
+	if s.vault.Unsealed() {
+		return &zatterav1.UnsealResponse{AlreadyUnsealed: true}, nil
+	}
+	if req.GetPassphrase() == "" {
+		return nil, status.Error(codes.InvalidArgument, "passphrase is required")
+	}
+	km, ok := s.store.ClusterKeyMaterial()
+	if !ok {
+		return nil, status.Error(codes.FailedPrecondition, "cluster key material unavailable")
+	}
+	if err := s.vault.UnsealWithPassphrase(km, req.GetPassphrase()); err != nil {
+		if errors.Is(err, secrets.ErrSealedDataInvalid) {
+			return nil, status.Error(codes.PermissionDenied, "wrong recovery passphrase")
+		}
+		return nil, toStatus(err)
+	}
+	if s.onUnseal != nil {
+		s.onUnseal()
+	}
+	return &zatterav1.UnsealResponse{}, nil
 }
 
 // CreateToken issues a personal access token for the caller.

@@ -25,23 +25,25 @@ import (
 type SnapshotDispatcher struct {
 	store   *state.Store
 	raft    Applier
-	sealer  secrets.Sealer
-	dataKey []byte
+	vault   *secrets.Vault
 	connect func(ctx context.Context, node *zatterav1.Node) (*grpc.ClientConn, error)
 	clock   clock.Clock
 	log     *slog.Logger
 }
 
-// NewSnapshotDispatcher builds the dispatcher. sealer/dataKey come from the
+// NewSnapshotDispatcher builds the dispatcher. The vault supplies both the
+// sealer and the data key, so a node unsealed after startup can snapshot
+// without a restart. Previously the key was captured as bytes at construction
+// time, which made that impossible (T-111). Original note: it comes from the
 // unsealed keyring; connect dials a node's AgentLocalService.
-func NewSnapshotDispatcher(store *state.Store, raft Applier, sealer secrets.Sealer, dataKey []byte, connect func(context.Context, *zatterav1.Node) (*grpc.ClientConn, error), clk clock.Clock, log *slog.Logger) *SnapshotDispatcher {
+func NewSnapshotDispatcher(store *state.Store, raft Applier, vault *secrets.Vault, connect func(context.Context, *zatterav1.Node) (*grpc.ClientConn, error), clk clock.Clock, log *slog.Logger) *SnapshotDispatcher {
 	if clk == nil {
 		clk = clock.Real{}
 	}
 	if log == nil {
 		log = slog.Default()
 	}
-	return &SnapshotDispatcher{store: store, raft: raft, sealer: sealer, dataKey: dataKey, connect: connect, clock: clk, log: log}
+	return &SnapshotDispatcher{store: store, raft: raft, vault: vault, connect: connect, clock: clk, log: log}
 }
 
 // Snapshot (scheduler-facing) fires a snapshot in the background so the leader
@@ -183,18 +185,18 @@ func (d *SnapshotDispatcher) Prune(ctx context.Context, _ *zatterav1.Volume, dea
 
 // s3Target unseals the backup config + attaches the data key for a node op.
 func (d *SnapshotDispatcher) s3Target() (*clusterv1.S3Target, error) {
-	if len(d.dataKey) == 0 || d.sealer == nil {
+	if !d.vault.Unsealed() {
 		return nil, errors.New("cluster is not unsealed; cannot snapshot")
 	}
 	bc, ok := d.store.BackupConfig()
 	if !ok || bc.GetS3Bucket() == "" {
 		return nil, errors.New("backup destination not configured (set an S3 bucket)")
 	}
-	ak, err := d.sealer.Open(bc.GetS3AccessKey())
+	ak, err := d.vault.Open(bc.GetS3AccessKey())
 	if err != nil {
 		return nil, fmt.Errorf("unseal s3 access key: %w", err)
 	}
-	sk, err := d.sealer.Open(bc.GetS3SecretKey())
+	sk, err := d.vault.Open(bc.GetS3SecretKey())
 	if err != nil {
 		return nil, fmt.Errorf("unseal s3 secret key: %w", err)
 	}
@@ -205,7 +207,9 @@ func (d *SnapshotDispatcher) s3Target() (*clusterv1.S3Target, error) {
 		Region:    bc.GetS3Region(),
 		AccessKey: string(ak),
 		SecretKey: string(sk),
-		DataKey:   d.dataKey,
+		// Read per call, not captured at construction: the vault may have been
+		// unsealed after this dispatcher was built.
+		DataKey: d.vault.DataKey(),
 	}, nil
 }
 

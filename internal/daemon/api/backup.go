@@ -33,26 +33,26 @@ type CAMaterial interface {
 // control node (it needs the data key to seal/unseal credentials + state).
 type BackupServer struct {
 	zatterav1.UnimplementedBackupServiceServer
-	store  *state.Store
-	raft   Applier
-	sealer secrets.Sealer
-	ca     CAMaterial
-	clock  clock.Clock
+	store *state.Store
+	raft  Applier
+	vault *secrets.Vault
+	ca    CAMaterial
+	clock clock.Clock
 }
 
 // NewBackupServer builds the backup service. sealer/ca may be nil on a sealed
 // node; all methods then return FailedPrecondition.
-func NewBackupServer(store *state.Store, raft Applier, sealer secrets.Sealer, ca CAMaterial, clk clock.Clock) *BackupServer {
+func NewBackupServer(store *state.Store, raft Applier, vault *secrets.Vault, ca CAMaterial, clk clock.Clock) *BackupServer {
 	if clk == nil {
 		clk = clock.Real{}
 	}
-	return &BackupServer{store: store, raft: raft, sealer: sealer, ca: ca, clock: clk}
+	return &BackupServer{store: store, raft: raft, vault: vault, ca: ca, clock: clk}
 }
 
 // SetBackupConfig stores the S3 destination, sealing the plaintext credentials
 // with the cluster data key.
 func (s *BackupServer) SetBackupConfig(ctx context.Context, req *zatterav1.SetBackupConfigRequest) (*emptypb.Empty, error) {
-	if s.sealer == nil {
+	if !s.vault.Unsealed() {
 		return nil, status.Error(codes.FailedPrecondition, "cluster is not unsealed")
 	}
 	cfg := req.GetConfig()
@@ -64,14 +64,14 @@ func (s *BackupServer) SetBackupConfig(ctx context.Context, req *zatterav1.SetBa
 		return nil, status.Error(codes.InvalidArgument, "s3_bucket is required")
 	}
 	if ak := req.GetS3AccessKeyPlain(); ak != "" {
-		ev, err := s.sealer.Seal([]byte(ak))
+		ev, err := s.vault.Seal([]byte(ak))
 		if err != nil {
 			return nil, toStatus(err)
 		}
 		cfg.S3AccessKey = ev
 	}
 	if sk := req.GetS3SecretKeyPlain(); sk != "" {
-		ev, err := s.sealer.Seal([]byte(sk))
+		ev, err := s.vault.Seal([]byte(sk))
 		if err != nil {
 			return nil, toStatus(err)
 		}
@@ -88,7 +88,7 @@ func (s *BackupServer) SetBackupConfig(ctx context.Context, req *zatterav1.SetBa
 // TriggerBackup runs a full backup now (state + CA + key material + volume
 // snapshot refs) to the configured destination and records it.
 func (s *BackupServer) TriggerBackup(ctx context.Context, _ *zatterav1.TriggerBackupRequest) (*zatterav1.BackupRecord, error) {
-	if s.sealer == nil || s.ca == nil {
+	if !s.vault.Unsealed() || s.ca == nil {
 		return nil, status.Error(codes.FailedPrecondition, "cluster is not unsealed")
 	}
 	km, ok := s.store.ClusterKeyMaterial()
@@ -107,7 +107,7 @@ func (s *BackupServer) TriggerBackup(ctx context.Context, _ *zatterav1.TriggerBa
 	idx, err := backup.Backup(ctx, backup.Input{
 		Store:       s.store,
 		ObjectStore: objStore,
-		Sealer:      s.sealer,
+		Sealer:      s.vault,
 		KeyMaterial: km,
 		CACertPEM:   s.ca.CABundlePEM(),
 		CAKeyPEM:    caKey,
@@ -156,7 +156,7 @@ func (s *BackupServer) backupStore() (volumes.ObjectStore, error) {
 	if !ok || cfg.GetS3Bucket() == "" {
 		return nil, status.Error(codes.FailedPrecondition, "no backup destination configured (set an S3 bucket)")
 	}
-	store, err := ObjectStoreFor(cfg, s.sealer)
+	store, err := ObjectStoreFor(cfg, s.vault)
 	if err != nil {
 		return nil, toStatus(err)
 	}

@@ -39,7 +39,7 @@ func newAppHarness(t *testing.T) (*appHarness, string) {
 	rbac := NewRBAC(st)
 
 	dataKey, _ := secrets.GenerateDataKey()
-	sealer, _ := secrets.NewSealer(dataKey, 1)
+	vault := mustVault(mustKeyring(dataKey, 1))
 
 	authority, err := ca.LoadOrCreate(t.TempDir())
 	if err != nil {
@@ -50,9 +50,9 @@ func newAppHarness(t *testing.T) (*appHarness, string) {
 		Listen:         "127.0.0.1:0",
 		DNSNames:       []string{"localhost"},
 		IPs:            []net.IP{net.ParseIP("127.0.0.1")},
-		AuthService:    NewAuthServer(st, rs, clk, ""),
+		AuthService:    NewAuthServer(st, rs, clk, "", secrets.NewVault()),
 		ProjectService: NewProjectServer(st, rs, clk, rbac),
-		AppService:     NewAppServer(st, rs, clk, sealer),
+		AppService:     NewAppServer(st, rs, clk, vault),
 		UnaryInterceptors: []grpc.UnaryServerInterceptor{
 			auth.UnaryInterceptor, rbac.UnaryInterceptor,
 		},

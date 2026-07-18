@@ -47,7 +47,7 @@ type SyncServer struct {
 	log     *slog.Logger
 	// sealer decrypts env vars for the per-assignment runtime payload. May be
 	// nil before the cluster key is unsealed (env is then omitted).
-	sealer secrets.Sealer
+	vault *secrets.Vault
 
 	assignmentDebounce time.Duration
 	statusFlush        time.Duration
@@ -67,7 +67,7 @@ func (s *SyncServer) notLeader() bool {
 // NewSyncServer builds the control-side AgentSync handler. applier commits
 // status batches (SetAssignmentsObserved) through raft; sealer decrypts env
 // vars pushed to agents (may be nil).
-func NewSyncServer(store *state.Store, applier Applier, live *livestate.Registry, clk clock.Clock, log *slog.Logger, sealer secrets.Sealer) *SyncServer {
+func NewSyncServer(store *state.Store, applier Applier, live *livestate.Registry, clk clock.Clock, log *slog.Logger, vault *secrets.Vault) *SyncServer {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -80,7 +80,7 @@ func NewSyncServer(store *state.Store, applier Applier, live *livestate.Registry
 		live:               live,
 		clock:              clk,
 		log:                log,
-		sealer:             sealer,
+		vault:              vault,
 		assignmentDebounce: defaultAssignmentDebounce,
 		statusFlush:        defaultStatusFlush,
 	}
@@ -278,9 +278,9 @@ func (s *SyncServer) buildRuntime(a *zatterav1.Assignment) *clusterv1.Assignment
 	// any user value; PORT defaults to the first port but respects a user
 	// override.
 	env := map[string]string{}
-	if s.sealer != nil {
+	if s.vault.Unsealed() {
 		for k, ev := range s.store.EnvVars(a.GetEnvironmentId()) {
-			pt, err := s.sealer.Open(ev)
+			pt, err := s.vault.Open(ev)
 			if err != nil {
 				s.log.Warn("agentsync: env var decrypt failed", "env", a.GetEnvironmentId(), "key", k, "err", err)
 				continue

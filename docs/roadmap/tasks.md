@@ -4288,6 +4288,70 @@ else's history from the ring.
 node is throttled without dropping other nodes' events.
 **Acceptance:** `go test ./internal/daemon/api/ ./internal/daemon/agent/`
 
+### T-111 — A restarted node was sealed forever ✅ **DONE**
+
+Phase 9 · Depends: T-03 · Size: S
+**Problem:** the cluster data key entered a process only via `Bootstrap` (first
+boot) or the control-node join handover, and `Keyring` was memory-only by
+design. `Bootstrap` is idempotent, so **every restart came up sealed** — and
+there was no `unseal` command, so it stayed that way. Reproduced live: create an
+alert channel, restart the daemon on the same data dir, repeat →
+`cluster key is not unsealed; cannot store channel secrets`, permanently.
+Alerting, `zt env set`, backups, volume snapshots and the GitHub webhook all
+degraded silently, with no log line saying why.
+**Files:** `internal/daemon/secrets/vault.go` (new), every `secrets.Sealer`
+consumer, `internal/daemon/api/auth.go`, `internal/cli/unseal.go` (new),
+`api/proto/zattera/v1/api.proto`, `docs/operations/sealing.md` (new)
+**Done:**
+
+1. `secrets.Vault` — an always-non-nil holder implementing `Sealer`, with
+   `Unsealed()`, `Install()` and `OnUnseal()` hooks. Sealed reads return
+   `ErrSealed`; a nil vault degrades to sealed rather than panicking.
+2. Replaced every nil `Sealer` and the three **construction-time** gates
+   (snapshot dispatcher + backup server, alert engine, archiver) so subsystems
+   exist while sealed and start working on unseal — no second restart.
+3. `AuthService.Unseal` (reqAdmin) + `zt unseal --passphrase-file`, deriving the
+   key from `ClusterKeyMaterial` with the recovery passphrase.
+4. `WhoAmIResponse.sealed`, plus a loud startup warning naming what is disabled.
+5. Fixed `githubroutes.go` memoizing "cluster key not unsealed" **before** its
+   nil check, which would have survived the unseal that fixed it.
+
+**Gotchas:** `SnapshotDispatcher` captured `keyring.DataKey()` as bytes at
+construction, so it could never observe a later unseal — now read per call.
+`Install` is idempotent so an operator racing auto-unseal cannot swap the sealer
+under in-flight work.
+**Tests:** `secrets/vault_test.go` (incl. `-race` and nil-receiver),
+`api/unseal_test.go`, plus a live dev-cluster run of the original repro.
+**Acceptance:** `go test ./internal/daemon/secrets/ ./internal/daemon/api/`
+
+### T-112 — Auto-unseal on restart ✅ **DONE**
+
+Phase 9 · Depends: T-111 · Size: M
+**Problem:** T-111 gave operators a way back, but a rebooted node still needed a
+human. For a single-binary PaaS that is the wrong default.
+**Files:** `internal/daemon/unseal.go` (new), `internal/daemon/api/keysvc.go`
+(new), `api/proto/zattera/cluster/v1/agent.proto`, `internal/config/config.go`,
+`docs/contributing/architecture-decision-records/0006-auto-unseal-on-restart.md`
+**Done:**
+
+1. Recovery order at startup: local key file → control peer over mTLS → stay
+   sealed and warn.
+2. `<data-dir>/node/data.key`, mode 0600, written after any successful unseal.
+   Deliberately not wrapped by a host-local key — see ADR-0006.
+3. `KeyService.FetchDataKey` (cluster/v1, `reqNode` + control-role check). NOT a
+   reuse of `JoinService`: join tokens are single-use and joining mints mesh
+   IPs, certs and registry credentials that must not repeat every reboot.
+4. `sealed_at_rest = true` opts out of the on-disk cache.
+
+**Gotchas:** peer discovery needs raft up — `mesh.json` is written at join but
+never read back, and the peer set lives only inside raft's boltdb, so the fetch
+runs after `WaitForLeader`. ADR-0006 records why an on-disk key is an acceptable
+trade given the CA private key is already unencrypted in the data dir.
+**Tests:** `internal/daemon/unseal_test.go` (round trip, 0600 mode, opt-out,
+corrupt/missing file), `api/unseal_test.go` KeyService authz, plus a live
+dev-cluster run of all three recovery paths.
+**Acceptance:** `go test ./internal/daemon/ ./internal/daemon/api/`
+
 ---
 
 # Backlog (M4/M5 — do not implement now)
@@ -4534,5 +4598,5 @@ P6: T-55(17,08)→T-56 · T-57(20)→T-58 · T-59(13)→T-60(41)/T-61(23) ·
 P7: T-69(61,42)→T-70→T-71 · T-72(45)→T-73 · T-74(59,07) · T-75(37,45) ·
     T-76 · T-77(65) · T-78 · T-79(54) · T-80(all)
 P8: T-81(12)→T-82→T-83 · T-84(83,17,29)→T-85(84) · T-86(84,85)
-P9: T-91(53,40) · T-92(66,76) · T-93(14) · T-94(19) · T-95(93,94,54) · T-96(12) · T-97(87,88) · T-98(63,97) · T-99(31) · T-100(35,95) · T-101(32,55)→T-102(101,64) · T-103(12) · T-104(44) · T-105(44) · T-106(51) · T-107(19) · T-108(11) · T-109(74)→T-110(109,14)
+P9: T-91(53,40) · T-92(66,76) · T-93(14) · T-94(19) · T-95(93,94,54) · T-96(12) · T-97(87,88) · T-98(63,97) · T-99(31) · T-100(35,95) · T-101(32,55)→T-102(101,64) · T-103(12) · T-104(44) · T-105(44) · T-106(51) · T-107(19) · T-108(11) · T-109(74)→T-110(109,14) · T-111(03)→T-112(111)
 ```

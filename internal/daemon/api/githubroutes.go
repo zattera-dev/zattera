@@ -32,11 +32,14 @@ const (
 
 // NewGitHubWebhook builds the POST /v1/github/webhook handler backed by cluster
 // state. The webhook secret and App private key are read (sealed) from the KV
-// store; a nil sealer or missing key degrades gracefully (deploys are skipped).
+// store; a sealed vault or missing key degrades gracefully (deploys are skipped).
 // The returned *github.Previews is the preview-environment manager; the daemon
 // runs its SweepExpired in a leader-gated janitor loop (T-75).
-func NewGitHubWebhook(store *state.Store, raft Applier, sealer secrets.Sealer, clk clock.Clock, domain string, log *slog.Logger) (http.Handler, *github.Previews) {
-	gw := &githubWebhook{store: store, raft: raft, sealer: sealer, clk: clk, domain: domain, log: log}
+func NewGitHubWebhook(store *state.Store, raft Applier, vault *secrets.Vault, clk clock.Clock, domain string, log *slog.Logger) (http.Handler, *github.Previews) {
+	gw := &githubWebhook{store: store, raft: raft, vault: vault, clk: clk, domain: domain, log: log}
+	// A late unseal (operator or peer) must clear the memoized failure, or the
+	// App stays broken for the process lifetime even once the key is available.
+	vault.OnUnseal(gw.resetAppCache)
 	previews := github.NewPreviews(gw, gw, gw, gw, clk, log)
 	h := github.NewWebhook(gw, gw, gw, gw, log)
 	h.EnablePreviews(previews)
@@ -47,7 +50,7 @@ func NewGitHubWebhook(store *state.Store, raft Applier, sealer secrets.Sealer, c
 type githubWebhook struct {
 	store  *state.Store
 	raft   Applier
-	sealer secrets.Sealer
+	vault  *secrets.Vault
 	clk    clock.Clock
 	domain string
 	log    *slog.Logger
@@ -80,7 +83,7 @@ func (g *githubWebhook) AppByRepo(repo string) (*github.App, bool) {
 }
 
 func (g *githubWebhook) webhookSecret(appID string) []byte {
-	if g.sealer == nil {
+	if !g.vault.Unsealed() {
 		return nil
 	}
 	raw, _, _, ok := g.store.KV(kvGitHubSecretPfx + appID)
@@ -91,7 +94,7 @@ func (g *githubWebhook) webhookSecret(appID string) []byte {
 	if err := proto.Unmarshal(raw, &enc); err != nil {
 		return nil
 	}
-	pt, err := g.sealer.Open(&enc)
+	pt, err := g.vault.Open(&enc)
 	if err != nil {
 		return nil
 	}
@@ -128,11 +131,12 @@ func (g *githubWebhook) githubApp() (*github.GitHubApp, error) {
 	if g.loaded {
 		return g.ghApp, g.ghErr
 	}
-	g.loaded = true
-	if g.sealer == nil {
-		g.ghErr = fmt.Errorf("github: cluster key not unsealed")
-		return nil, g.ghErr
+	if !g.vault.Unsealed() {
+		// Deliberately not memoized: a sealed cluster is a transient state, and
+		// caching this would survive the unseal that fixes it.
+		return nil, fmt.Errorf("github: cluster key not unsealed")
 	}
+	g.loaded = true
 	raw, _, _, ok := g.store.KV(kvGitHubAppKey)
 	if !ok {
 		g.ghErr = fmt.Errorf("github: app key not configured")
@@ -143,7 +147,7 @@ func (g *githubWebhook) githubApp() (*github.GitHubApp, error) {
 		g.ghErr = err
 		return nil, err
 	}
-	pt, err := g.sealer.Open(&enc)
+	pt, err := g.vault.Open(&enc)
 	if err != nil {
 		g.ghErr = err
 		return nil, err
@@ -231,4 +235,12 @@ func splitAppKey(b []byte) (int64, []byte, error) {
 		}
 	}
 	return 0, nil, fmt.Errorf("github: malformed app key blob")
+}
+
+// resetAppCache clears the memoized GitHub App so it is rebuilt after an
+// unseal. Registered as a vault OnUnseal hook.
+func (g *githubWebhook) resetAppCache() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.ghApp, g.ghErr, g.loaded = nil, nil, false
 }

@@ -23,18 +23,18 @@ func newBackupHarness(t *testing.T, unsealed bool) (*BackupServer, secrets.Seale
 	rs := raftstore.NewTestStore(t)
 	ctx := withIdentity(context.Background(), Identity{UserID: "admin"})
 	if !unsealed {
-		return NewBackupServer(rs.State(), rs, nil, nil, clock.NewFake()), nil, ctx
+		return NewBackupServer(rs.State(), rs, secrets.NewVault(), nil, clock.NewFake()), nil, ctx
 	}
 	dataKey, _ := secrets.GenerateDataKey()
-	sealer, _ := secrets.NewSealer(dataKey, 1)
+	vault := mustVault(mustKeyring(dataKey, 1))
 	// The cluster's key material must exist for TriggerBackup.
 	km, _ := secrets.SealDataKey(dataKey, "recovery-pass", 1)
 	rs.State().SetClusterKeyMaterial(km)
-	return NewBackupServer(rs.State(), rs, sealer, fakeCA{}, clock.NewFake()), sealer, ctx
+	return NewBackupServer(rs.State(), rs, vault, fakeCA{}, clock.NewFake()), vault, ctx
 }
 
 func TestSetBackupConfigSealsCreds(t *testing.T) {
-	srv, sealer, ctx := newBackupHarness(t, true)
+	srv, vault, ctx := newBackupHarness(t, true)
 
 	_, err := srv.SetBackupConfig(ctx, &zatterav1.SetBackupConfigRequest{
 		Config:           &zatterav1.BackupConfig{S3Endpoint: "s3.example.com", S3Bucket: "backups", S3Region: "eu"},
@@ -50,11 +50,11 @@ func TestSetBackupConfigSealsCreds(t *testing.T) {
 		t.Fatalf("config not stored: %+v", cfg)
 	}
 	// Credentials are sealed, not plaintext.
-	ak, err := sealer.Open(cfg.GetS3AccessKey())
+	ak, err := vault.Open(cfg.GetS3AccessKey())
 	if err != nil || string(ak) != "AKIA" {
 		t.Fatalf("access key not sealed/recoverable: %q err=%v", ak, err)
 	}
-	sk, _ := sealer.Open(cfg.GetS3SecretKey())
+	sk, _ := vault.Open(cfg.GetS3SecretKey())
 	if string(sk) != "shh" {
 		t.Fatalf("secret key = %q, want shh", sk)
 	}

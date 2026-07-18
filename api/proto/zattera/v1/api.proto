@@ -45,6 +45,17 @@ service AuthService {
   rpc WhoAmI(google.protobuf.Empty) returns (WhoAmIResponse) {
     option (google.api.http) = {get: "/v1/auth/whoami"};
   }
+  // Unseal installs the cluster data key on THIS node from the recovery
+  // passphrase. A node that did not bootstrap the cluster comes up sealed
+  // (T-111): it serves normally but cannot read or write secrets, so
+  // alerting, env-var writes and backups stay disabled until this is called
+  // or the node recovers the key from a control peer.
+  rpc Unseal(UnsealRequest) returns (UnsealResponse) {
+    option (google.api.http) = {
+      post: "/v1/cluster/unseal"
+      body: "*"
+    };
+  }
   rpc CreateToken(CreateTokenRequest) returns (CreateTokenResponse) {
     option (google.api.http) = {
       post: "/v1/auth/tokens"
@@ -84,6 +95,18 @@ message WhoAmIResponse {
   // Cluster app domain (cfg.domain): apps publish at <app>-<env>.<cluster_domain>.
   // Empty when the node has no configured domain.
   string cluster_domain = 3;
+  // sealed reports that the node serving this request holds no cluster data
+  // key: secret reads/writes, alert delivery and backups are unavailable on it
+  // until it is unsealed. Per-process, not cluster-wide replicated state.
+  bool sealed = 4;
+}
+
+message UnsealRequest {
+  string passphrase = 1; // the cluster recovery passphrase
+}
+
+message UnsealResponse {
+  bool already_unsealed = 1; // true when the node was not sealed to begin with
 }
 
 message CreateTokenRequest {

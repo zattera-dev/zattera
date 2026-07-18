@@ -19,6 +19,7 @@ import (
 	"github.com/zattera-dev/zattera/internal/daemon/api"
 	"github.com/zattera-dev/zattera/internal/daemon/livestate"
 	"github.com/zattera-dev/zattera/internal/daemon/raftstore"
+	"github.com/zattera-dev/zattera/internal/daemon/secrets"
 	"github.com/zattera-dev/zattera/internal/pkgutil/clock"
 	"github.com/zattera-dev/zattera/internal/pkgutil/ids"
 )
@@ -101,7 +102,7 @@ func newRig(t *testing.T) *rig {
 
 	// Control-side server (no auth interceptor → handler trusts hello.node_id).
 	r.grpcSrv = grpc.NewServer()
-	clusterv1.RegisterAgentSyncServiceServer(r.grpcSrv, api.NewSyncServer(rs.State(), rs, r.live, r.serverClk, log, nil))
+	clusterv1.RegisterAgentSyncServiceServer(r.grpcSrv, api.NewSyncServer(rs.State(), rs, r.live, r.serverClk, log, secrets.NewVault()))
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)

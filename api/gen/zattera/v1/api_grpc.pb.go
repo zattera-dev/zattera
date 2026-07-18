@@ -33,6 +33,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	AuthService_Login_FullMethodName       = "/zattera.v1.AuthService/Login"
 	AuthService_WhoAmI_FullMethodName      = "/zattera.v1.AuthService/WhoAmI"
+	AuthService_Unseal_FullMethodName      = "/zattera.v1.AuthService/Unseal"
 	AuthService_CreateToken_FullMethodName = "/zattera.v1.AuthService/CreateToken"
 	AuthService_ListTokens_FullMethodName  = "/zattera.v1.AuthService/ListTokens"
 	AuthService_RevokeToken_FullMethodName = "/zattera.v1.AuthService/RevokeToken"
@@ -47,6 +48,12 @@ type AuthServiceClient interface {
 	// Login exchanges email+password for a short-lived session token.
 	Login(ctx context.Context, in *LoginRequest, opts ...grpc.CallOption) (*LoginResponse, error)
 	WhoAmI(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*WhoAmIResponse, error)
+	// Unseal installs the cluster data key on THIS node from the recovery
+	// passphrase. A node that did not bootstrap the cluster comes up sealed
+	// (T-111): it serves normally but cannot read or write secrets, so
+	// alerting, env-var writes and backups stay disabled until this is called
+	// or the node recovers the key from a control peer.
+	Unseal(ctx context.Context, in *UnsealRequest, opts ...grpc.CallOption) (*UnsealResponse, error)
 	CreateToken(ctx context.Context, in *CreateTokenRequest, opts ...grpc.CallOption) (*CreateTokenResponse, error)
 	ListTokens(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ListTokensResponse, error)
 	RevokeToken(ctx context.Context, in *RevokeTokenRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
@@ -76,6 +83,16 @@ func (c *authServiceClient) WhoAmI(ctx context.Context, in *emptypb.Empty, opts 
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(WhoAmIResponse)
 	err := c.cc.Invoke(ctx, AuthService_WhoAmI_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authServiceClient) Unseal(ctx context.Context, in *UnsealRequest, opts ...grpc.CallOption) (*UnsealResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UnsealResponse)
+	err := c.cc.Invoke(ctx, AuthService_Unseal_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -139,6 +156,12 @@ type AuthServiceServer interface {
 	// Login exchanges email+password for a short-lived session token.
 	Login(context.Context, *LoginRequest) (*LoginResponse, error)
 	WhoAmI(context.Context, *emptypb.Empty) (*WhoAmIResponse, error)
+	// Unseal installs the cluster data key on THIS node from the recovery
+	// passphrase. A node that did not bootstrap the cluster comes up sealed
+	// (T-111): it serves normally but cannot read or write secrets, so
+	// alerting, env-var writes and backups stay disabled until this is called
+	// or the node recovers the key from a control peer.
+	Unseal(context.Context, *UnsealRequest) (*UnsealResponse, error)
 	CreateToken(context.Context, *CreateTokenRequest) (*CreateTokenResponse, error)
 	ListTokens(context.Context, *emptypb.Empty) (*ListTokensResponse, error)
 	RevokeToken(context.Context, *RevokeTokenRequest) (*emptypb.Empty, error)
@@ -159,6 +182,9 @@ func (UnimplementedAuthServiceServer) Login(context.Context, *LoginRequest) (*Lo
 }
 func (UnimplementedAuthServiceServer) WhoAmI(context.Context, *emptypb.Empty) (*WhoAmIResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method WhoAmI not implemented")
+}
+func (UnimplementedAuthServiceServer) Unseal(context.Context, *UnsealRequest) (*UnsealResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Unseal not implemented")
 }
 func (UnimplementedAuthServiceServer) CreateToken(context.Context, *CreateTokenRequest) (*CreateTokenResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateToken not implemented")
@@ -228,6 +254,24 @@ func _AuthService_WhoAmI_Handler(srv interface{}, ctx context.Context, dec func(
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AuthServiceServer).WhoAmI(ctx, req.(*emptypb.Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AuthService_Unseal_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UnsealRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).Unseal(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_Unseal_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).Unseal(ctx, req.(*UnsealRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -336,6 +380,10 @@ var AuthService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "WhoAmI",
 			Handler:    _AuthService_WhoAmI_Handler,
+		},
+		{
+			MethodName: "Unseal",
+			Handler:    _AuthService_Unseal_Handler,
 		},
 		{
 			MethodName: "CreateToken",

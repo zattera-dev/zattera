@@ -32,6 +32,14 @@ type Config struct {
 	// mesh off, bootstrap admin token printed at first start.
 	Dev bool `toml:"dev"`
 
+	// SealedAtRest keeps the cluster data key off local disk. The node then
+	// cannot auto-unseal itself after a restart: it comes up sealed (alerting,
+	// env-var writes and backups disabled) until an operator runs
+	// `zattera unseal` or it recovers the key from a control peer. Default
+	// false, which favours a node coming back working after a reboot; see
+	// ADR-0005.
+	SealedAtRest bool `toml:"sealed_at_rest"`
+
 	API      APIConfig      `toml:"api"`
 	Ingress  IngressConfig  `toml:"ingress"`
 	Registry RegistryConfig `toml:"registry"`

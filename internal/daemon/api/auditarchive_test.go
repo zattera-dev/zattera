@@ -24,12 +24,12 @@ func archiveHarness(t *testing.T) (*Auditor, *volumes.MemStore, secrets.Sealer, 
 	rs := raftstore.NewTestStore(t)
 	st := rs.State()
 	key, _ := secrets.GenerateDataKey()
-	sealer, _ := secrets.NewSealer(key, 1)
+	vault := mustVault(mustKeyring(key, 1))
 	store := volumes.NewMemStore()
 
 	a := NewAuditor(st, rs, nil, 0)
-	a.SetArchive(func() (*archive.Reader, bool) { return archive.NewReader(store, sealer), true })
-	return a, store, sealer, time.Now()
+	a.SetArchive(func() (*archive.Reader, bool) { return archive.NewReader(store, vault), true })
+	return a, store, vault, time.Now()
 }
 
 func auditAt(at time.Time, method string) *zatterav1.AuditEntry {
@@ -39,9 +39,9 @@ func auditAt(at time.Time, method string) *zatterav1.AuditEntry {
 	}
 }
 
-func putArchive(t *testing.T, store *volumes.MemStore, sealer secrets.Sealer, key string, recs ...proto.Message) {
+func putArchive(t *testing.T, store *volumes.MemStore, vault secrets.Sealer, key string, recs ...proto.Message) {
 	t.Helper()
-	blob, err := archive.Encode(sealer, recs)
+	blob, err := archive.Encode(vault, recs)
 	if err != nil {
 		t.Fatalf("encode: %v", err)
 	}
@@ -55,7 +55,7 @@ func putArchive(t *testing.T, store *volumes.MemStore, sealer secrets.Sealer, ke
 // appears once, ordering stays newest-first, and the caller is told how many
 // entries came from the archive.
 func TestQueryAuditIncludeArchive(t *testing.T) {
-	a, store, sealer, now := archiveHarness(t)
+	a, store, vault, now := archiveHarness(t)
 
 	// Ring: two recent entries.
 	recent := auditAt(now.Add(-time.Minute), "/zattera.v1.AppService/CreateApp")
@@ -66,7 +66,7 @@ func TestQueryAuditIncludeArchive(t *testing.T) {
 	old := auditAt(now.Add(-90*24*time.Hour), "/zattera.v1.AppService/DeleteApp")
 	startMs := old.GetMeta().GetCreatedAt().AsTime().UnixMilli()
 	endMs := overlap.GetMeta().GetCreatedAt().AsTime().UnixMilli()
-	putArchive(t, store, sealer,
+	putArchive(t, store, vault,
 		fmt.Sprintf("audit/2026-04-21/%d-%d-%s.ndjson.gz.enc", startMs, endMs, ids.New()),
 		old, overlap)
 

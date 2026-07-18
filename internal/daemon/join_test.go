@@ -20,6 +20,7 @@ import (
 	"github.com/zattera-dev/zattera/internal/daemon/api"
 	"github.com/zattera-dev/zattera/internal/daemon/ca"
 	"github.com/zattera-dev/zattera/internal/daemon/raftstore"
+	"github.com/zattera-dev/zattera/internal/daemon/secrets"
 	"github.com/zattera-dev/zattera/internal/pkgutil/clock"
 	"github.com/zattera-dev/zattera/internal/pkgutil/ids"
 )
@@ -32,7 +33,7 @@ func TestClientJoin(t *testing.T) {
 		t.Fatalf("ca: %v", err)
 	}
 	rs := raftstore.NewTestStore(t)
-	joinSrv := api.NewJoinServer(rs.State(), rs, clock.NewFake(), authority, nil, api.JoinConfig{
+	joinSrv := api.NewJoinServer(rs.State(), rs, clock.NewFake(), authority, secrets.NewVault(), api.JoinConfig{
 		MeshEnabled:     true,
 		ControlGRPCAddr: "10.90.0.1:8443",
 		RegistryAddr:    "10.90.0.1:5000",
