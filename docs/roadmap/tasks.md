@@ -3634,6 +3634,51 @@ names the env + index; the absent array still yields `http/8080`; an explicit
 
 ---
 
+### T-100 — Build dispatch ignores cordon (and always picks the same node)
+
+Phase 9 · Depends: T-35, T-95 · Size: S
+**Problem:** `pickBuilder` (`internal/daemon/scheduler/builds.go`) selects the
+lowest-id node with `status == ALIVE` and `labels["builder"] == "true"`. It
+never consults `Schedulable`, so a **cordoned node still receives builds** —
+directly contradicting what cordon promises ("stop scheduling new work on a
+node") and what `zt cluster upgrade` relies on: the upgrade cordons a node
+before swapping its binary, and a build dispatched into that window runs
+against a daemon that is about to restart. The same function also makes build
+placement degenerate: lowest-id-wins means one machine runs every build, so
+adding workers never adds build capacity, and a busy builder is never relieved.
+**Files:** `internal/daemon/scheduler/builds.go`, `internal/daemon/scheduler/builds_test.go`,
+`docs/deploy/builds.md`, `docs/setup/nodes.md`
+**Steps:**
+
+1. Skip unschedulable nodes in `pickBuilder`: require
+   `n.GetSchedulable()` alongside ALIVE + `builder=true`. A cordoned node must
+   not be handed new builds.
+2. If no schedulable builder exists, leave the build QUEUED (the dispatcher
+   already retries) rather than failing it — cordoning the only builder should
+   delay a build, not break the deploy. Emit an event once so it is visible.
+3. Replace lowest-id with a load-aware pick: fewest in-flight builds first,
+   then lowest id as the deterministic tie-break. Keep it deterministic —
+   the dispatcher runs on the leader and must not flap between ticks.
+4. Consider (do not implement blindly) whether the layer-cache locality of
+   sticky placement outweighs spreading; if it does, document that choice
+   instead of changing step 3.
+
+**Gotchas:** the drain path already stops workloads but builds are not
+assignments, so a draining node needs the same exclusion. Don't break the
+single-node/dev case, where the only node is both control and builder — it
+stays schedulable, so it keeps working. `cluster upgrade` cordons then
+uncordons; make sure a build queued during the cordon window is picked up
+after uncordon without operator action.
+**Tests:** unit — a cordoned builder is skipped; with no schedulable builder
+the build stays QUEUED and is dispatched after uncordon; with two idle
+builders the one with fewer in-flight builds wins, ties broken by id.
+**Acceptance:** `go test ./internal/daemon/scheduler/ -run TestBuildDispatch`
+**Docs:** drop the "cordoning a node does not stop builds landing on it" and
+"builds are not spread across nodes" notes from `docs/deploy/builds.md` once
+this lands.
+
+---
+
 # Backlog (M4/M5 — do not implement now)
 
 - **M4:** SSO/OIDC login; wildcard certs via DNS-01 (libdns providers);
@@ -3878,5 +3923,5 @@ P6: T-55(17,08)→T-56 · T-57(20)→T-58 · T-59(13)→T-60(41)/T-61(23) ·
 P7: T-69(61,42)→T-70→T-71 · T-72(45)→T-73 · T-74(59,07) · T-75(37,45) ·
     T-76 · T-77(65) · T-78 · T-79(54) · T-80(all)
 P8: T-81(12)→T-82→T-83 · T-84(83,17,29)→T-85(84) · T-86(84,85)
-P9: T-91(53,40) · T-92(66,76) · T-93(14) · T-94(19) · T-95(93,94,54) · T-96(12) · T-97(87,88) · T-98(63,97) · T-99(31)
+P9: T-91(53,40) · T-92(66,76) · T-93(14) · T-94(19) · T-95(93,94,54) · T-96(12) · T-97(87,88) · T-98(63,97) · T-99(31) · T-100(35,95)
 ```
