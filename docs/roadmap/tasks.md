@@ -22,8 +22,9 @@ something runnable.
 > **T-61** (CPU/mem/RPS autoscaler), **T-62** (node-pinned volumes + fencing
 > leases), **T-63** (stateful stop-then-start deploys), **T-64** (content-
 > addressed snapshot engine), **T-65** (snapshot orchestration + CLI) and
-> **T-66** (full backup + `zatterad restore` DR) are done. Next up: T-67 (cron
-> jobs).
+> **T-66** (full backup + `zatterad restore` DR) are done. In Phase 7, **T-75**
+> (per-PR preview environments: `pull_request` webhooks → `preview-<n>` envs
+> cloned from staging, PR-comment URLs, per-app cap, TTL janitor) is done.
 
 ## What already exists (do not rebuild)
 
@@ -2729,23 +2730,33 @@ transition), `backup.failed` (BackupService.TriggerBackup error path), and
 `cert.renew_failed` (ACME renewal failure in tlsmgr) so the remaining built-in
 event rules fire. Small, spread across those subsystems.
 
-### T-75 — Preview environments (PR → preview-*)
+### T-75 — Preview environments (PR → preview-*)  ✅ **DONE**
 Phase 7 · Depends: T-37, T-45 · Size: M
-**Files:** `internal/daemon/github/previews.go`, tests
-**Steps:**
-1. PR webhooks (opened/synchronize → create/update env `preview-<n>` of type
-   PREVIEW with `preview_pr_number`, spec copied from staging, TTL 7d via
-   `preview_expires_at`; build+deploy the PR head SHA; comment the URL on
-   the PR (installation token)). closed → delete env (cascades teardown).
-2. Janitor: expired previews deleted (leader loop).
-3. Cluster-subdomain URL: `<app>-preview-<n>.<domain>` comes free from the
-   route builder — verify naming there (env name IS `preview-<n>`).
-**Gotchas:** cap concurrent previews per app (5, config later) — LE
-rate-limit protection is the whole reason (spec §3.6 note); same-branch
-force-push storms → dedupe by head SHA.
-**Tests:** unit — webhook lifecycle open→sync→close with a fake GitHub API,
-TTL janitor with fake clock, cap enforcement.
-**Acceptance:** `go test ./internal/daemon/github/ -run TestPreviews`
+**Files:** `internal/daemon/github/previews.go`,
+`internal/daemon/api/githubpreviews.go`, `internal/daemon/previewwiring.go`, tests
+**Done:**
+1. `pull_request` webhook events (opened/reopened/synchronize → ensure
+   `preview-<n>`; closed → delete). `github.Previews` holds all policy over a
+   `PreviewStore` port; the api adapter implements it against state+raft.
+2. Env creation clones the service spec **and env vars** from `staging`
+   (→ `production` → any non-preview env), type PREVIEW with
+   `preview_pr_number` + `preview_expires_at` (7d, extended on every PR event).
+3. Build+deploy of the PR head SHA reuses `DeployGit`; the URL is commented on
+   the PR once, at creation, via `GitHubApp.CommentPR` (installation token).
+4. Janitor: `runPreviewJanitor` sweeps expired previews hourly on the leader
+   (`leaderrunner`); deletion cascades to containers via the scheduler's orphan
+   reconciler and drops the route + certificate.
+5. Cap of 5 concurrent previews per app (LE rate-limit protection); the over-cap
+   PR gets a comment explaining why instead of silently getting nothing.
+6. Head-SHA dedupe: a synchronize for an already-deployed commit extends the TTL
+   but does not rebuild (force-push storms / redeliveries).
+7. URL naming verified: env name IS `preview-<n>`, so the T-45 route builder
+   yields `<app>-preview-<n>.<domain>` unchanged; `PreviewURL` mirrors it.
+**Tests:** `previews_test.go` — lifecycle open→sync→close, SHA dedupe, cap
+enforcement + slot reuse, TTL janitor on a fake clock, HTTP routing/dedupe/
+disabled. `githubpreviews_test.go` — adapter over a real raft store: spec+var
+cloning, base-env preference order, head-SHA resolution, TTL touch, delete.
+**Acceptance:** `go test ./internal/daemon/github/ -run TestPreviews` ✅
 
 ### T-76 — Audit query CLI + events surfacing
 Phase 7 · Depends: T-07 · Size: S

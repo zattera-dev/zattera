@@ -148,6 +148,29 @@ func (g *GitHubApp) SetCommitStatus(ctx context.Context, token, repo, sha, state
 	return nil
 }
 
+// CommentPR posts an issue comment on a pull request (PRs are issues in the
+// REST API) using an installation token — used to announce preview URLs (T-75).
+func (g *GitHubApp) CommentPR(ctx context.Context, token, repo string, pr int64, comment string) error {
+	body, _ := json.Marshal(map[string]string{"body": comment})
+	url := fmt.Sprintf("%s/repos/%s/issues/%d/comments", g.baseURL, repo, pr)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "token "+token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := g.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode/100 != 2 {
+		return fmt.Errorf("github: comment on PR %d: HTTP %d", pr, resp.StatusCode)
+	}
+	return nil
+}
+
 // appJWT builds a signed RS256 JWT for the app (10-minute validity, per
 // GitHub's contract). Hand-rolled to avoid a JWT dependency.
 func (g *GitHubApp) appJWT(now time.Time) (string, error) {

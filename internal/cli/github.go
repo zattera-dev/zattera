@@ -71,7 +71,7 @@ func newGitHubConnectCmd() *cobra.Command {
 			p.Infof("  Payload URL:  %s", webhookURL)
 			p.Infof("  Content type: application/json")
 			p.Infof("  Secret:       %s", secret)
-			p.Infof("  Events:       Just the push event")
+			p.Infof("  Events:       Pushes, plus Pull requests for preview environments")
 			p.Infof("")
 			p.Infof("Then install the Zattera GitHub App on %s and store its", repo)
 			p.Infof("private key and the webhook secret on the control plane.")

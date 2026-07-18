@@ -33,9 +33,14 @@ const (
 // NewGitHubWebhook builds the POST /v1/github/webhook handler backed by cluster
 // state. The webhook secret and App private key are read (sealed) from the KV
 // store; a nil sealer or missing key degrades gracefully (deploys are skipped).
-func NewGitHubWebhook(store *state.Store, raft Applier, sealer secrets.Sealer, clk clock.Clock, log *slog.Logger) http.Handler {
-	gw := &githubWebhook{store: store, raft: raft, sealer: sealer, clk: clk, log: log}
-	return github.NewWebhook(gw, gw, gw, gw, log)
+// The returned *github.Previews is the preview-environment manager; the daemon
+// runs its SweepExpired in a leader-gated janitor loop (T-75).
+func NewGitHubWebhook(store *state.Store, raft Applier, sealer secrets.Sealer, clk clock.Clock, domain string, log *slog.Logger) (http.Handler, *github.Previews) {
+	gw := &githubWebhook{store: store, raft: raft, sealer: sealer, clk: clk, domain: domain, log: log}
+	previews := github.NewPreviews(gw, gw, gw, gw, clk, log)
+	h := github.NewWebhook(gw, gw, gw, gw, log)
+	h.EnablePreviews(previews)
+	return h, previews
 }
 
 // githubWebhook adapts cluster state to the github package's interfaces.
@@ -44,6 +49,7 @@ type githubWebhook struct {
 	raft   Applier
 	sealer secrets.Sealer
 	clk    clock.Clock
+	domain string
 	log    *slog.Logger
 
 	mu     sync.Mutex

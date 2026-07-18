@@ -24,7 +24,7 @@ This stores the repo and the **branch → environment mapping** on the app, gene
 https://<your-api-address>/v1/github/webhook
 ```
 
-with content type `application/json`, the printed secret, and the **push** event.
+with content type `application/json`, the printed secret, and the **push** event — add the **pull request** event too if you want [preview environments](preview-environments).
 
 You can also declare the repo in [`zattera.toml`](zattera-toml) under `[github]`.
 
@@ -35,4 +35,4 @@ You can also declare the repo in [`zattera.toml`](zattera-toml) under `[github]`
 3. **Deploy** — the webhook responds immediately, then in the background Zattera mints a short-lived GitHub App installation token, records a git **build** (pinned to the pushed commit SHA), a new **release**, and a **deployment** — the same [red/green pipeline](./) as a CLI deploy. The builder clones the repo at that exact SHA using the installation token; no deploy keys to manage.
 4. **Commit status** — deploy progress is reported back to the commit as a `zattera` status check (pending → success/failure).
 
-Per-PR [preview environments](preview-environments) build on this and are on the roadmap.
+Pull-request events on the same webhook drive per-PR [preview environments](preview-environments).

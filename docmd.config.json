@@ -57,7 +57,7 @@
         { "title": "Environment variables", "path": "/deploy/environment-variables/", "icon": "key" },
         { "title": "Custom domains", "path": "/deploy/custom-domains/", "icon": "globe" },
         { "title": "GitHub push-to-deploy", "path": "/deploy/github/", "icon": "github" },
-        { "title": "Preview environments · WIP", "path": "/deploy/preview-environments/", "icon": "git-pull-request" }
+        { "title": "Preview environments", "path": "/deploy/preview-environments/", "icon": "git-pull-request" }
       ]
     },
     {

@@ -57,10 +57,15 @@ type Webhook struct {
 	deployer Deployer
 	dedup    Deduper
 	tokens   TokenSource
+	previews *Previews // nil until EnablePreviews (T-75)
 	log      *slog.Logger
 
 	inflight sync.WaitGroup
 }
+
+// EnablePreviews turns on PR → preview-<n> environments (T-75). Without it
+// pull_request events are acknowledged and ignored.
+func (h *Webhook) EnablePreviews(p *Previews) { h.previews = p }
 
 // NewWebhook builds the webhook handler.
 func NewWebhook(apps AppStore, deployer Deployer, dedup Deduper, tokens TokenSource, log *slog.Logger) *Webhook {
@@ -83,6 +88,17 @@ type repoEnvelope struct {
 type pushPayload struct {
 	Ref   string `json:"ref"`   // "refs/heads/<branch>"
 	After string `json:"after"` // pushed SHA
+}
+
+type prPayload struct {
+	Action      string `json:"action"`
+	Number      int64  `json:"number"`
+	PullRequest struct {
+		Head struct {
+			Ref string `json:"ref"`
+			SHA string `json:"sha"`
+		} `json:"head"`
+	} `json:"pull_request"`
 }
 
 func (h *Webhook) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -120,6 +136,8 @@ func (h *Webhook) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]bool{"pong": true})
 	case "push":
 		h.handlePush(r, app, env, body, w)
+	case "pull_request":
+		h.handlePullRequest(r, app, env, body, w)
 	default:
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ignored"})
 	}
@@ -169,6 +187,48 @@ func (h *Webhook) handlePush(r *http.Request, app *App, env repoEnvelope, body [
 		h.log.Info("github push deployed", "repo", app.Repo, "branch", branch, "env", envName, "deployment", depID)
 	}()
 	writeJSON(w, http.StatusOK, map[string]string{"status": "accepted", "environment": envName})
+}
+
+// handlePullRequest drives preview environments (T-75). Like push, the reply is
+// immediate and the work happens in the background.
+func (h *Webhook) handlePullRequest(r *http.Request, app *App, env repoEnvelope, body []byte, w http.ResponseWriter) {
+	if h.previews == nil {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "previews disabled"})
+		return
+	}
+	delivery := r.Header.Get("X-GitHub-Delivery")
+	if delivery != "" && h.dedup.Seen(delivery) {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "duplicate"})
+		return
+	}
+	var pr prPayload
+	if err := json.Unmarshal(body, &pr); err != nil {
+		http.Error(w, "bad pull_request payload", http.StatusBadRequest)
+		return
+	}
+	if pr.Number <= 0 {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ignored"})
+		return
+	}
+
+	ev := PullRequestEvent{
+		Action:   pr.Action,
+		Number:   pr.Number,
+		Branch:   pr.PullRequest.Head.Ref,
+		HeadSHA:  pr.PullRequest.Head.SHA,
+		CloneURL: env.Repository.CloneURL,
+	}
+	h.inflight.Add(1)
+	go func() {
+		defer h.inflight.Done()
+		// Previews create a build + a deployment; allow more room than a push.
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		if err := h.previews.OnPullRequest(ctx, app, ev); err != nil {
+			h.log.Error("github preview", "repo", app.Repo, "pr", ev.Number, "action", ev.Action, "err", err)
+		}
+	}()
+	writeJSON(w, http.StatusOK, map[string]string{"status": "accepted", "environment": PreviewEnvName(pr.Number)})
 }
 
 // validSignature checks the "sha256=<hex>" X-Hub-Signature-256 header against

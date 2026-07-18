@@ -424,6 +424,8 @@ func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store
 		backupSrv = api.NewBackupServer(st, rs, sealer, authority, clk)
 	}
 
+	githubWebhook, previews := api.NewGitHubWebhook(st, rs, sealer, clk, cfg.Domain, log)
+
 	apiSrv, err := api.New(api.Options{
 		CA:                authority,
 		Listen:            cfg.API.Listen,
@@ -452,7 +454,7 @@ func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store
 		RouteService:      api.NewRouteServer(routeBuilder),
 		ActivatorService:  activatorSrv,
 		DomainService:     api.NewDomainServer(st, rs, clk, cfg.Domain),
-		GitHubWebhook:     api.NewGitHubWebhook(st, rs, sealer, clk, log),
+		GitHubWebhook:     githubWebhook,
 		SourceBlobHandler: api.SourceBlobHandler(uploadsDir),
 		UnaryInterceptors: []grpc.UnaryServerInterceptor{
 			forwarder.UnaryInterceptor, authn.UnaryInterceptor, rbac.UnaryInterceptor, auditor.UnaryInterceptor,
@@ -538,6 +540,10 @@ func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store
 	// images and stale source tarballs. The registry sweeper is wired when this
 	// control node hosts a local registry.
 	go scheduler.NewRetention(rs, clk, retentionSweeper, uploadsDir, log).Run(ctx)
+
+	// Preview-environment janitor (T-75): the leader deletes previews past their
+	// TTL; container teardown cascades from the environment going away.
+	go runPreviewJanitor(ctx, rs, previews, clk)
 
 	// Build dispatcher (T-35/T-54): the leader assigns QUEUED builds to builder
 	// nodes over their AgentLocalService and records the outcome. Leader-gated.
