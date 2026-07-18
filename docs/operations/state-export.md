@@ -26,4 +26,4 @@ The export contains **desired state only** — what you've declared, not what's 
 
 Names are the identity: `apply` diffs by project/app/environment name and proposes creates and updates, which makes it idempotent — applying the same file twice is a no-op. Unknown fields produce warnings rather than hard failures, and `--dry-run` runs the full validation path without writing.
 
-Full disaster recovery — state *plus* volumes and images onto fresh metal — is a separate, bigger hammer: see [Backup & DR](../data/backup-restore) *(work in progress)*.
+Full disaster recovery — state *plus* volumes and images onto fresh metal — is a separate, bigger hammer: see [Backup & DR](../data/backup-restore).

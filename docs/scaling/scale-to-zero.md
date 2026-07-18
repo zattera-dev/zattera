@@ -1,6 +1,6 @@
 ---
 title: Scale to zero & serverless
-description: Idle apps scale to zero replicas and wake on request — work in progress.
+description: Idle apps scale to zero replicas and wake on the next request.
 ---
 
 # Scale to zero & serverless

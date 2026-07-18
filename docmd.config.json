@@ -88,15 +88,15 @@
       "icon": "database",
       "children": [
         { "title": "Volumes", "path": "/data/volumes/", "icon": "hard-drive" },
-        { "title": "Backup & DR · WIP", "path": "/data/backup-restore/", "icon": "life-buoy" }
+        { "title": "Backup & DR", "path": "/data/backup-restore/", "icon": "life-buoy" }
       ]
     },
     {
       "title": "Scaling",
       "icon": "trending-up",
       "children": [
-        { "title": "Autoscaling · WIP", "path": "/scaling/autoscaling/", "icon": "gauge" },
-        { "title": "Scale to zero · WIP", "path": "/scaling/scale-to-zero/", "icon": "moon" }
+        { "title": "Autoscaling", "path": "/scaling/autoscaling/", "icon": "gauge" },
+        { "title": "Scale to zero", "path": "/scaling/scale-to-zero/", "icon": "moon" }
       ]
     },
     { "title": "Roadmap", "path": "/roadmap/tasks/", "icon": "map" },
