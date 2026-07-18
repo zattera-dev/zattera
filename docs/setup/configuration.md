@@ -77,6 +77,12 @@ email = "ops@example.com"
 | `listen_port` | `51820` | WireGuard UDP port |
 | `interface` | `zt0` | Interface name (macOS auto-picks `utunN`) |
 | `public_endpoints` | autodetected | `ip:port` endpoints this node is reachable at |
+| `mode` | `auto` | WireGuard datapath — see below |
+
+`mode` selects how the mesh moves packets ([ADR-0003](../contributing/architecture-decision-records/0003-mesh-nat-traversal-phasing)):
+
+- `auto` (or unset) — kernel WireGuard when available, userspace otherwise. Hub and direct peering only, so each node needs a routable endpoint or a hub to relay through.
+- `meshsock` — userspace WireGuard with UDP hole punching and a TCP relay fallback. Set this on NAT'd nodes that need worker↔worker connectivity without a routable endpoint.
 
 ### `[acme]`
 
@@ -108,6 +114,21 @@ Worker-only nodes (no `control` role) **must** set `join.addr`.
 | `max_stream_mb` | `100` | Retained log bytes per stream |
 | `retention_days` | `7` | Log age cap in days |
 
+### `[upgrade]`
+
+| Key | Default | Meaning |
+| --- | ------- | ------- |
+| `base_url` | official release host | The only host this node downloads upgrade binaries from |
+
+`zt cluster upgrade` ends in "download this and execute it", so the node — not the control plane — decides where binaries may come from. An **empty value means the official release host, not "any URL"**. Point it at a private mirror, or set `base_url = "*"` to accept whatever the control plane hands over.
+
+```toml
+[upgrade]
+base_url = "https://mirror.internal/zattera/releases"
+```
+
+See [Upgrades](../operations/upgrades) for the rest of the model.
+
 ## `zattera server` flags
 
 Flags override the corresponding config keys (only when non-empty):
@@ -134,6 +155,7 @@ Flags override the corresponding config keys (only when non-empty):
 | Registry | `:5000`, TLS | `:5001`, plain HTTP *(forced)* — avoids macOS AirPlay on 5000 |
 | Built images | pushed to registry | loaded straight into local Docker |
 | Managed containers on shutdown | kept running | cleaned up |
+| Blue-drain window after promotion | 10 minutes | 20 seconds — faster local iteration |
 
 Dev mode prints a startup banner with every effective endpoint, plus machine-readable `DEVBANNER:` lines (`api`, `domain`, `ingress_http`, `ingress_https`, `registry`, `ca`, `ca_fingerprint`, `data_dir`, and — first boot only — `token`) for scripting.
 

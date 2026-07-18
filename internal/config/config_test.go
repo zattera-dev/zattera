@@ -3,6 +3,8 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -80,4 +82,34 @@ func TestValidateRules(t *testing.T) {
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("bogus role accepted")
 	}
+}
+
+// TestEveryKeyIsDocumented walks the config struct's toml tags and asserts each
+// one appears in the configuration reference. Two keys (mesh.mode, upgrade.base_url)
+// shipped undocumented; this keeps the page honest as the struct grows.
+func TestEveryKeyIsDocumented(t *testing.T) {
+	doc, err := os.ReadFile("../../docs/setup/configuration.md")
+	if err != nil {
+		t.Skipf("docs not available: %v", err)
+	}
+	page := string(doc)
+
+	var walk func(reflect.Type)
+	walk = func(rt reflect.Type) {
+		for i := 0; i < rt.NumField(); i++ {
+			f := rt.Field(i)
+			tag := f.Tag.Get("toml")
+			if tag == "" {
+				continue
+			}
+			if f.Type.Kind() == reflect.Struct {
+				walk(f.Type)
+				continue
+			}
+			if !strings.Contains(page, "`"+tag+"`") {
+				t.Errorf("config key %q is not documented in docs/setup/configuration.md", tag)
+			}
+		}
+	}
+	walk(reflect.TypeOf(Config{}))
 }
