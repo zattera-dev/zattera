@@ -23,6 +23,7 @@ func newEventsCmd() *cobra.Command {
 		kind     string
 		severity string
 		limit    uint32
+		archive  bool
 	)
 	cmd := &cobra.Command{
 		Use:   "events",
@@ -33,6 +34,12 @@ func newEventsCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if severity != "" && severity != "info" && severity != "warning" && severity != "error" {
 				return fmt.Errorf("invalid --severity %q: want info, warning or error", severity)
+			}
+			if follow && archive {
+				// Following re-queries every 2s; each archive read lists and
+				// fetches objects, so this would hammer the bucket for data
+				// that by definition is not new.
+				return fmt.Errorf("--archive cannot be combined with --follow (the archive only holds settled history)")
 			}
 			client, _, err := clientFromContext()
 			if err != nil {
@@ -53,10 +60,11 @@ func newEventsCmd() *cobra.Command {
 				return err
 			}
 			req := &zatterav1.ListEventsRequest{
-				ProjectId:  projectID,
-				KindPrefix: kind,
-				Severity:   severity,
-				Limit:      limit,
+				ProjectId:      projectID,
+				KindPrefix:     kind,
+				Severity:       severity,
+				Limit:          limit,
+				IncludeArchive: archive,
 			}
 			if since > 0 {
 				req.SinceUnixMs = time.Now().Add(-since).UnixMilli()
@@ -88,6 +96,9 @@ func newEventsCmd() *cobra.Command {
 				})
 			}
 			p.Table([]string{"TIME", "SEVERITY", "KIND", "MESSAGE"}, rows)
+			if n := resp.GetFromArchive(); n > 0 {
+				p.Infof("merged: %d from archive, %d live", n, uint32(len(events))-n)
+			}
 			return nil
 		},
 	}
@@ -96,6 +107,7 @@ func newEventsCmd() *cobra.Command {
 	cmd.Flags().StringVar(&kind, "kind", "", "only events whose kind has this prefix (e.g. deploy.)")
 	cmd.Flags().StringVar(&severity, "severity", "", "only this severity (info, warning, error)")
 	cmd.Flags().Uint32Var(&limit, "limit", 100, "maximum events per poll")
+	cmd.Flags().BoolVar(&archive, "archive", false, "also read events aged out of cluster state into object storage")
 	addProjectFlag(cmd)
 	return cmd
 }

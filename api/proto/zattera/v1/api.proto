@@ -895,10 +895,14 @@ message QueryAuditRequest {
   int64 since_unix_ms = 4;
   int64 until_unix_ms = 5;
   uint32 limit = 6; // default 100
+  // Also read entries that have aged out of the in-state ring into the
+  // object-storage archive (requires backup.archive; see T-92).
+  bool include_archive = 7;
 }
 
 message QueryAuditResponse {
   repeated AuditEntry entries = 1;
+  uint32 from_archive = 2; // how many entries came from the archive
 }
 
 message ListEventsRequest {
@@ -908,10 +912,12 @@ message ListEventsRequest {
   string severity = 4;    // "info" | "warning" | "error"
   int64 since_unix_ms = 5;
   uint32 limit = 6; // default 100
+  bool include_archive = 7; // also read the object-storage archive
 }
 
 message ListEventsResponse {
   repeated Event events = 1;
+  uint32 from_archive = 2; // how many events came from the archive
 }
 
 service BackupService {

@@ -66,6 +66,9 @@ message BackupConfig {
   EncryptedValue s3_secret_key = 6;
   string schedule = 7; // cron for full state backups
   bool verify = 8;     // periodic restore-test job (spec §3.11)
+  // Continuously archive audit entries and events to the same destination
+  // before they age out of their in-state rings. Off by default.
+  bool archive = 9;
 }
 
 // BackupRecord is one completed backup run.

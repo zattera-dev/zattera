@@ -545,6 +545,11 @@ func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store
 	// TTL; container teardown cascades from the environment going away.
 	go runPreviewJanitor(ctx, rs, previews, clk)
 
+	// Audit/event archive (T-92): when backup.archive is on, the leader copies
+	// both rings to the backup destination before they age out, and the query
+	// path can read them back. No-op while archiving is off.
+	go runArchiver(ctx, rs, auditor, sealer, clk, log)
+
 	// Build dispatcher (T-35/T-54): the leader assigns QUEUED builds to builder
 	// nodes over their AgentLocalService and records the outcome. Leader-gated.
 	_, apiPortStr, _ := net.SplitHostPort(cfg.API.Listen)

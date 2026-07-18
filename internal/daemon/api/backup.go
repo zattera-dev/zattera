@@ -150,23 +150,33 @@ func (s *BackupServer) backupStore() (volumes.ObjectStore, error) {
 	if !ok || cfg.GetS3Bucket() == "" {
 		return nil, status.Error(codes.FailedPrecondition, "no backup destination configured (set an S3 bucket)")
 	}
-	ak, err := s.sealer.Open(cfg.GetS3AccessKey())
-	if err != nil {
-		return nil, toStatus(fmt.Errorf("unseal s3 access key: %w", err))
-	}
-	sk, err := s.sealer.Open(cfg.GetS3SecretKey())
-	if err != nil {
-		return nil, toStatus(fmt.Errorf("unseal s3 secret key: %w", err))
-	}
-	host, ssl := parseS3Endpoint(cfg.GetS3Endpoint())
-	store, err := volumes.NewS3Store(volumes.S3Config{
-		Endpoint: host, Region: cfg.GetS3Region(), Bucket: cfg.GetS3Bucket(), Prefix: cfg.GetS3Prefix(),
-		AccessKey: string(ak), SecretKey: string(sk), UseSSL: ssl,
-	})
+	store, err := ObjectStoreFor(cfg, s.sealer)
 	if err != nil {
 		return nil, toStatus(err)
 	}
 	return store, nil
+}
+
+// ObjectStoreFor builds the S3 client for a backup destination, unsealing its
+// credentials. Shared by the backup path and the audit/event archiver (T-92),
+// which deliberately reuse one destination and one set of credentials.
+func ObjectStoreFor(cfg *zatterav1.BackupConfig, sealer secrets.Sealer) (volumes.ObjectStore, error) {
+	if sealer == nil {
+		return nil, fmt.Errorf("cluster key not unsealed")
+	}
+	ak, err := sealer.Open(cfg.GetS3AccessKey())
+	if err != nil {
+		return nil, fmt.Errorf("unseal s3 access key: %w", err)
+	}
+	sk, err := sealer.Open(cfg.GetS3SecretKey())
+	if err != nil {
+		return nil, fmt.Errorf("unseal s3 secret key: %w", err)
+	}
+	host, ssl := parseS3Endpoint(cfg.GetS3Endpoint())
+	return volumes.NewS3Store(volumes.S3Config{
+		Endpoint: host, Region: cfg.GetS3Region(), Bucket: cfg.GetS3Bucket(), Prefix: cfg.GetS3Prefix(),
+		AccessKey: string(ak), SecretKey: string(sk), UseSSL: ssl,
+	})
 }
 
 func recordCmd(rec *zatterav1.BackupRecord) *clusterv1.Command {

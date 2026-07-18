@@ -698,6 +698,35 @@ func (s *Store) ListEvents(limit int) []*zatterav1.Event {
 	return cloneAll(s.events[n-limit:])
 }
 
+// AuditSince returns every audit entry created at or after sinceMs, in append
+// order (oldest first). The archiver walks the ring forward from its cursor
+// with this; unlike QueryAudit it is uncapped, because skipping entries would
+// silently lose them from the archive.
+func (s *Store) AuditSince(sinceMs int64) []*zatterav1.AuditEntry {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []*zatterav1.AuditEntry
+	for _, e := range s.audit {
+		if e.GetMeta().GetCreatedAt().AsTime().UnixMilli() >= sinceMs {
+			out = append(out, clone(e))
+		}
+	}
+	return out
+}
+
+// EventsSince is AuditSince for the event ring.
+func (s *Store) EventsSince(sinceMs int64) []*zatterav1.Event {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []*zatterav1.Event
+	for _, e := range s.events {
+		if e.GetMeta().GetCreatedAt().AsTime().UnixMilli() >= sinceMs {
+			out = append(out, clone(e))
+		}
+	}
+	return out
+}
+
 // QueryEvents returns the newest events matching the filter, newest first —
 // the same ordering contract as QueryAudit, so the two read consistently.
 // (ListEvents keeps its append-order tail for the alert engine, which replays

@@ -55,7 +55,7 @@ zt audit --actor usr_01H... --json        # one user, machine-readable
 
 Reading the cluster-wide log requires an **org owner/admin** token. `--method` matches a prefix of the full gRPC method name, so `/zattera.v1.AppService/` narrows to one service and `/zattera.v1.AppService/SetEnvVars` to one call.
 
-The audit log is a **capped ring** in replicated state, not an archive — old entries age out. Export what you need to keep with `--json` on a schedule.
+The audit log is a **capped ring** in replicated state (50 000 entries; events keep 10 000), so on a busy cluster it holds days, not years. For durable retention, turn on archiving.
 
 ## Events
 
@@ -71,6 +71,39 @@ zt events --severity error --since 1h
 Unlike the audit log, events are **not** admin-only: any project member can read their own project's events. Cluster-wide (`zt events` with no `--project`) still requires an org owner/admin. `--kind` matches a prefix, so `deploy.` covers `deploy.succeeded` and `deploy.failed`.
 
 Follow mode polls every two seconds — there is no server-side event stream — and prints each event exactly once.
+
+## Long-term retention
+
+Both rings can be archived to object storage before entries age out. Archiving reuses the [backup](../data/backup-restore) destination and credentials — there is nothing separate to configure:
+
+```bash
+zt backup config --bucket zattera-backups --archive
+```
+
+From then on the leader sweeps settled audit entries and events to the bucket every five minutes, as gzipped NDJSON **encrypted with the cluster data key**, exactly like a backup. Query across the seam with `--archive`:
+
+```bash
+zt audit --since 90d --archive
+zt events --since 90d --archive --kind deploy.
+```
+
+The result merges the live ring with the archive, deduplicated and newest-first; the CLI prints how many entries came from each. Archived reads go through the API, so the CLI never needs bucket credentials, and normal access control still applies — a project member reading `--archive` sees only their own project's events.
+
+Object layout, if you need to reach it directly:
+
+```
+<prefix>/audit/<YYYY-MM-DD>/<startMs>-<endMs>-<ulid>.ndjson.gz.enc
+<prefix>/events/<YYYY-MM-DD>/<startMs>-<endMs>-<ulid>.ndjson.gz.enc
+```
+
+The millisecond range in each name lets a time-scoped query skip objects without downloading them. Objects are sealed with the cluster data key, so reading them outside Zattera means unsealing with the recovery passphrase — the same trade as backups.
+
+Notes:
+
+- **Nothing is ever deleted.** Zattera only writes; how long objects live is your bucket's lifecycle policy to decide.
+- **Archiving does not shorten the ring.** Recent history stays queryable without touching the bucket, and `--archive` is only needed to reach past it.
+- **A sweep that crashes mid-flight re-archives its batch** rather than risk losing it; the reader deduplicates by id, so duplicates never surface.
+- **`--archive` cannot be combined with `-f`** — following re-queries every two seconds, and the archive only holds settled history.
 
 Sensitive values get extra gates on top of RBAC: env var reveal requires developer+ *and* an unsealed cluster key (see [Environment variables](../deploy/environment-variables#how-it-works)).
 

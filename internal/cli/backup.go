@@ -29,8 +29,9 @@ func newBackupCmd() *cobra.Command {
 
 func newBackupConfigCmd() *cobra.Command {
 	var endpoint, bucket, region, prefix, accessKey, secretKey string
+	var archive bool
 	cmd := &cobra.Command{
-		Use:   "config --bucket NAME [--endpoint URL] [--region R] [--prefix P]",
+		Use:   "config --bucket NAME [--endpoint URL] [--region R] [--prefix P] [--archive]",
 		Short: "Set the S3 backup destination (credentials are sealed server-side)",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if bucket == "" {
@@ -49,6 +50,7 @@ func newBackupConfigCmd() *cobra.Command {
 			_, err = client.Backup.SetBackupConfig(ctx, &zatterav1.SetBackupConfigRequest{
 				Config: &zatterav1.BackupConfig{
 					S3Endpoint: endpoint, S3Bucket: bucket, S3Region: region, S3Prefix: prefix,
+					Archive: archive,
 				},
 				S3AccessKeyPlain: ak,
 				S3SecretKeyPlain: sk,
@@ -56,7 +58,11 @@ func newBackupConfigCmd() *cobra.Command {
 			if err != nil {
 				return apiError(err)
 			}
-			printerFor(cmd).Successf("Backup destination set to s3://%s/%s", bucket, prefix)
+			p := printerFor(cmd)
+			p.Successf("Backup destination set to s3://%s/%s", bucket, prefix)
+			if archive {
+				p.Infof("audit/event archiving enabled; query it with 'zt audit --archive'")
+			}
 			return nil
 		},
 	}
@@ -66,6 +72,7 @@ func newBackupConfigCmd() *cobra.Command {
 	cmd.Flags().StringVar(&prefix, "prefix", "", "key prefix within the bucket")
 	cmd.Flags().StringVar(&accessKey, "access-key", "", "S3 access key (or AWS_ACCESS_KEY_ID)")
 	cmd.Flags().StringVar(&secretKey, "secret-key", "", "S3 secret key (or AWS_SECRET_ACCESS_KEY)")
+	cmd.Flags().BoolVar(&archive, "archive", false, "continuously archive audit entries and events here before they age out of cluster state")
 	return cmd
 }
 

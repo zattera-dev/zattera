@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -17,6 +19,7 @@ import (
 
 	clusterv1 "github.com/zattera-dev/zattera/api/gen/zattera/cluster/v1"
 	zatterav1 "github.com/zattera-dev/zattera/api/gen/zattera/v1"
+	"github.com/zattera-dev/zattera/internal/daemon/archive"
 	"github.com/zattera-dev/zattera/internal/pkgutil/ids"
 	"github.com/zattera-dev/zattera/internal/state"
 )
@@ -47,6 +50,24 @@ type Auditor struct {
 
 	queue   chan *zatterav1.AuditEntry
 	dropped atomic.Int64
+
+	// archive resolves the object-storage archive at query time; nil (or a
+	// false second result) means archiving is off and include_archive is a
+	// no-op rather than an error (T-92).
+	archive func() (*archive.Reader, bool)
+}
+
+// SetArchive wires the audit/event archive reader. Called by the daemon once
+// the cluster key is unsealed; without it include_archive returns ring data
+// only.
+func (a *Auditor) SetArchive(fn func() (*archive.Reader, bool)) { a.archive = fn }
+
+// archiveReader returns the reader if archiving is configured.
+func (a *Auditor) archiveReader() (*archive.Reader, bool) {
+	if a.archive == nil {
+		return nil, false
+	}
+	return a.archive()
 }
 
 // NewAuditor builds the audit middleware. interval<=0 uses the 2s default.
@@ -158,7 +179,7 @@ func (a *Auditor) flush(ctx context.Context, batch []*zatterav1.AuditEntry) {
 }
 
 // QueryAudit implements zatterav1.AuditServiceServer over state.QueryAudit.
-func (a *Auditor) QueryAudit(_ context.Context, req *zatterav1.QueryAuditRequest) (*zatterav1.QueryAuditResponse, error) {
+func (a *Auditor) QueryAudit(ctx context.Context, req *zatterav1.QueryAuditRequest) (*zatterav1.QueryAuditResponse, error) {
 	limit := int(req.GetLimit())
 	filter := func(e *zatterav1.AuditEntry) bool {
 		if p := req.GetProjectId(); p != "" && e.GetProjectId() != p {
@@ -178,7 +199,58 @@ func (a *Auditor) QueryAudit(_ context.Context, req *zatterav1.QueryAuditRequest
 		}
 		return true
 	}
-	return &zatterav1.QueryAuditResponse{Entries: a.store.QueryAudit(filter, limit)}, nil
+	entries := a.store.QueryAudit(filter, limit)
+	if !req.GetIncludeArchive() {
+		return &zatterav1.QueryAuditResponse{Entries: entries}, nil
+	}
+	reader, ok := a.archiveReader()
+	if !ok {
+		return &zatterav1.QueryAuditResponse{Entries: entries}, nil
+	}
+	archived, err := reader.Audit(ctx, req.GetSinceUnixMs(), req.GetUntilUnixMs(), limit, filter)
+	if err != nil {
+		return nil, toStatus(fmt.Errorf("read audit archive: %w", err))
+	}
+	merged, fromArchive := mergeAudit(entries, archived, limit)
+	return &zatterav1.QueryAuditResponse{Entries: merged, FromArchive: fromArchive}, nil
+}
+
+// mergeAudit folds archived entries into the live ring result: the ring wins on
+// id (an entry can legitimately be in both, since archiving does not remove it
+// from the ring), newest first, capped at limit. It also reports how many of
+// the entries that survived came from the archive.
+func mergeAudit(live, archived []*zatterav1.AuditEntry, limit int) ([]*zatterav1.AuditEntry, uint32) {
+	seen := make(map[string]bool, len(live))
+	for _, e := range live {
+		seen[e.GetMeta().GetId()] = true
+	}
+	out := append([]*zatterav1.AuditEntry(nil), live...)
+	fromArchive := map[string]bool{}
+	for _, e := range archived {
+		id := e.GetMeta().GetId()
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		fromArchive[id] = true
+		out = append(out, e)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].GetMeta().GetCreatedAt().AsTime().After(out[j].GetMeta().GetCreatedAt().AsTime())
+	})
+	if limit <= 0 {
+		limit = 100
+	}
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	var n uint32
+	for _, e := range out {
+		if fromArchive[e.GetMeta().GetId()] {
+			n++
+		}
+	}
+	return out, n
 }
 
 // ListEvents implements zatterav1.AuditServiceServer over state.QueryEvents.
@@ -222,7 +294,58 @@ func (a *Auditor) ListEvents(ctx context.Context, req *zatterav1.ListEventsReque
 		}
 		return true
 	}
-	return &zatterav1.ListEventsResponse{Events: a.store.QueryEvents(filter, int(req.GetLimit()))}, nil
+	limit := int(req.GetLimit())
+	events := a.store.QueryEvents(filter, limit)
+	if !req.GetIncludeArchive() {
+		return &zatterav1.ListEventsResponse{Events: events}, nil
+	}
+	reader, ok := a.archiveReader()
+	if !ok {
+		return &zatterav1.ListEventsResponse{Events: events}, nil
+	}
+	// The same filter runs over archived records, so a non-admin's project
+	// scoping applies to the archive exactly as it does to the ring.
+	archived, err := reader.Events(ctx, req.GetSinceUnixMs(), 0, limit, filter)
+	if err != nil {
+		return nil, toStatus(fmt.Errorf("read event archive: %w", err))
+	}
+	merged, fromArchive := mergeEvents(events, archived, limit)
+	return &zatterav1.ListEventsResponse{Events: merged, FromArchive: fromArchive}, nil
+}
+
+// mergeEvents is mergeAudit for events.
+func mergeEvents(live, archived []*zatterav1.Event, limit int) ([]*zatterav1.Event, uint32) {
+	seen := make(map[string]bool, len(live))
+	for _, e := range live {
+		seen[e.GetMeta().GetId()] = true
+	}
+	out := append([]*zatterav1.Event(nil), live...)
+	fromArchive := map[string]bool{}
+	for _, e := range archived {
+		id := e.GetMeta().GetId()
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		fromArchive[id] = true
+		out = append(out, e)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].GetMeta().GetCreatedAt().AsTime().After(out[j].GetMeta().GetCreatedAt().AsTime())
+	})
+	if limit <= 0 {
+		limit = 100
+	}
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	var n uint32
+	for _, e := range out {
+		if fromArchive[e.GetMeta().GetId()] {
+			n++
+		}
+	}
+	return out, n
 }
 
 // --- helpers ---

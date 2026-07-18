@@ -12,10 +12,11 @@ import (
 // newAuditCmd builds `zattera audit` — the audit log query (T-76).
 func newAuditCmd() *cobra.Command {
 	var (
-		since  time.Duration
-		method string
-		actor  string
-		limit  uint32
+		since   time.Duration
+		method  string
+		actor   string
+		limit   uint32
+		archive bool
 	)
 	cmd := &cobra.Command{
 		Use:   "audit",
@@ -23,7 +24,10 @@ func newAuditCmd() *cobra.Command {
 		Long: "Query the audit log. Every mutating API call is recorded with its actor,\n" +
 			"method, outcome and source address.\n\n" +
 			"Without --project the whole cluster is queried, which requires an org\n" +
-			"owner/admin token.",
+			"owner/admin token.\n\n" +
+			"The log is a capped ring in cluster state, so old entries age out. Pass\n" +
+			"--archive to also read entries that were swept to object storage (needs\n" +
+			"archiving enabled on the backup destination).",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			client, _, err := clientFromContext()
 			if err != nil {
@@ -39,10 +43,11 @@ func newAuditCmd() *cobra.Command {
 				return err
 			}
 			req := &zatterav1.QueryAuditRequest{
-				ProjectId:    projectID,
-				MethodPrefix: method,
-				ActorUserId:  actor,
-				Limit:        limit,
+				ProjectId:      projectID,
+				MethodPrefix:   method,
+				ActorUserId:    actor,
+				Limit:          limit,
+				IncludeArchive: archive,
 			}
 			if since > 0 {
 				req.SinceUnixMs = time.Now().Add(-since).UnixMilli()
@@ -72,6 +77,9 @@ func newAuditCmd() *cobra.Command {
 				})
 			}
 			p.Table([]string{"TIME", "ACTOR", "METHOD", "OUTCOME", "FROM"}, rows)
+			if n := resp.GetFromArchive(); n > 0 {
+				p.Infof("merged: %d from archive, %d live", n, uint32(len(entries))-n)
+			}
 			return nil
 		},
 	}
@@ -79,6 +87,7 @@ func newAuditCmd() *cobra.Command {
 	cmd.Flags().StringVar(&method, "method", "", "only methods with this prefix (e.g. Deploy, /zattera.v1.AppService/)")
 	cmd.Flags().StringVar(&actor, "actor", "", "only calls by this user id")
 	cmd.Flags().Uint32Var(&limit, "limit", 100, "maximum entries to return")
+	cmd.Flags().BoolVar(&archive, "archive", false, "also read entries aged out of cluster state into object storage")
 	addProjectFlag(cmd)
 	return cmd
 }

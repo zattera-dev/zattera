@@ -3168,6 +3168,49 @@ job-that-outlives-a-poll case (must not duplicate lines).
   drivers (implement against T-82's `RunDriverContractTest`); per-pool
   provider quota hints; spot/preemptible instance support.
 
+
+### T-92 — Audit/event retention on object storage  ✅ **DONE**
+Phase 9 · Depends: T-66, T-76 · Size: M
+**Problem:** audit entries and events live in capped rings in replicated state
+(50k / 10k), so on a busy cluster the trail holds days, not years — `zt audit`
+cannot answer "who deleted this app in April". The ring cap is correct (raft
+state must stay bounded); what was missing is a durable copy outside it.
+**Files:** `internal/daemon/archive/` (new), `internal/daemon/archivewiring.go`,
+`internal/daemon/api/audit.go`, `internal/cli/audit.go`, `internal/cli/events.go`
+**Done:**
+1. Opt-in via `BackupConfig.archive` (`zt backup config --archive`) — reuses the
+   backup destination and its sealed credentials; no second config or key path.
+2. Leader-gated sweeper (5m) copies both rings out as gzipped NDJSON sealed with
+   the cluster data key, keyed
+   `<stream>/<YYYY-MM-DD>/<startMs>-<endMs>-<ulid>.ndjson.gz.enc` so a
+   time-scoped read skips objects without fetching them.
+3. Resume cursor in the replicated KV (`archive/cursor/<stream>`) is a
+   millisecond watermark **plus the ids already written at that millisecond** — a
+   bare watermark is either lossy (exclusive) or duplicating (inclusive), and
+   audit ids are minted before the raft round trip so they are not a strict
+   watermark either. A 2-minute settle lag keeps in-flight records out of a
+   batch whose cursor would then skip their siblings.
+4. Cursor advances only after the object is durable: a crash re-archives a batch
+   rather than losing it, and the reader dedupes by id.
+5. Read-back: `include_archive` on QueryAudit/ListEvents merges archive with the
+   ring server-side (dedupe by id, newest-first, limit applied after the merge)
+   and reports `from_archive`. The CLI (`--archive`) therefore needs no bucket
+   credentials, and non-admin project scoping applies to archived records
+   because the same filter runs over both.
+6. Nothing is ever deleted — object lifetime is the bucket's lifecycle policy.
+**Tests:** `internal/daemon/archive/archive_test.go` — round trip, cursor
+resume (no loss/no duplication), same-millisecond boundary, settle lag,
+archiving-off no-op, key-range skipping (asserts objects outside the window are
+never fetched), and wrong-key-fails-to-decrypt.
+`internal/daemon/api/auditarchive_test.go` — merge semantics, overlap dedupe,
+filters over archived records, limit-after-merge, and the degraded path where
+`include_archive` is set but no archive is configured.
+**Acceptance:** `go test ./internal/daemon/archive/ ./internal/daemon/api/ -run 'TestArchive|TestQueryAuditIncludeArchive|TestIncludeArchive'` ✅
+**Not done (deliberate):** the archive is write-and-read-back only — no
+compaction of small objects, and a `--archive` query lists the stream prefix
+each time. Both are fine at the object counts an hourly-ish sweep produces;
+revisit if a cluster archives for years.
+
 # Dependency quick-reference
 
 ```
@@ -3183,5 +3226,5 @@ P6: T-55(17,08)→T-56 · T-57(20)→T-58 · T-59(13)→T-60(41)/T-61(23) ·
 P7: T-69(61,42)→T-70→T-71 · T-72(45)→T-73 · T-74(59,07) · T-75(37,45) ·
     T-76 · T-77(65) · T-78 · T-79(54) · T-80(all)
 P8: T-81(12)→T-82→T-83 · T-84(83,17,29)→T-85(84) · T-86(84,85)
-P9: T-91(53,40)
+P9: T-91(53,40) · T-92(66,76)
 ```
