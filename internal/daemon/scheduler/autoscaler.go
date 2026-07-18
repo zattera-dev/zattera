@@ -26,8 +26,9 @@ const (
 	// scaleDownHold is how long a signal must stay below the down band before a
 	// scale-down fires.
 	scaleDownHold = 5 * time.Minute
-	// scaleCooldown gates a scale-down for this long after any change (scale-up
-	// stays immediate).
+	// scaleCooldown gates the next change for this long after any change, in
+	// BOTH directions — the scale-up branch checks it too. (This comment used
+	// to claim scale-up was exempt, which its own code has never done.)
 	scaleCooldown = 3 * time.Minute
 	// downBand: a scale-down only starts once utilization sits below this
 	// fraction of target (hysteresis against flapping at the boundary).
