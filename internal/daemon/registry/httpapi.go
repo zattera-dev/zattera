@@ -30,6 +30,9 @@ type Handler struct {
 	manifests *Manifests
 	auth      Authenticator
 	log       *slog.Logger
+	// fetcher, when set, fetches blobs/manifests this node lacks from peer
+	// control nodes before answering a miss (T-101). Nil disables pull-through.
+	fetcher *Fetcher
 }
 
 // NewHandler wires the blob/upload push surface (T-31) with no manifest store
@@ -187,6 +190,13 @@ func (h *Handler) blob(w http.ResponseWriter, r *http.Request, dgst string) {
 	switch r.Method {
 	case http.MethodHead, http.MethodGet:
 		size, err := h.store.Stat(dgst)
+		if errors.Is(err, ErrBlobUnknown) {
+			// Pull-through: another control node may hold this blob. Fetch and
+			// commit it, then serve from local storage (T-101).
+			if ferr := h.pullBlob(r, dgst); ferr == nil {
+				size, err = h.store.Stat(dgst)
+			}
+		}
 		if err != nil {
 			h.writeBlobStatError(w, err)
 			return
@@ -219,6 +229,13 @@ func (h *Handler) manifest(w http.ResponseWriter, r *http.Request, name, ref str
 	switch r.Method {
 	case http.MethodGet, http.MethodHead:
 		body, mediaType, digest, err := h.manifests.GetManifest(name, ref)
+		if errors.Is(err, ErrManifestUnknown) {
+			// Pull-through, including the manifest's children and blobs so the
+			// local refcount graph stays complete (T-101).
+			if ferr := h.pullManifest(r, name, ref); ferr == nil {
+				body, mediaType, digest, err = h.manifests.GetManifest(name, ref)
+			}
+		}
 		if err != nil {
 			h.writeManifestError(w, err)
 			return
@@ -388,4 +405,50 @@ func parseContentRangeStart(hdr string) (int64, error) {
 		return 0, fmt.Errorf("malformed content-range %q", hdr)
 	}
 	return start, nil
+}
+
+// pullBlob attempts a peer fetch for a blob this node does not have. It is a
+// no-op miss when pull-through is disabled (single-node clusters).
+func (h *Handler) pullBlob(r *http.Request, dgst string) error {
+	if h.fetcher == nil {
+		return ErrBlobUnknown
+	}
+	repo := repoFromPath(r.URL.Path, "/blobs/")
+	if repo == "" {
+		return ErrBlobUnknown
+	}
+	if err := h.fetcher.FetchBlob(r.Context(), h.store, repo, dgst); err != nil {
+		h.log.Debug("registry: blob not available from peers", "digest", dgst, "err", err)
+		return err
+	}
+	h.log.Info("registry: pulled blob through from a peer", "digest", dgst, "repo", repo)
+	return nil
+}
+
+// pullManifest attempts a peer fetch for a manifest this node does not have.
+func (h *Handler) pullManifest(r *http.Request, repo, ref string) error {
+	if h.fetcher == nil {
+		return ErrManifestUnknown
+	}
+	if err := h.fetcher.FetchManifest(r.Context(), h.manifests, h.store, repo, ref); err != nil {
+		h.log.Debug("registry: manifest not available from peers", "repo", repo, "ref", ref, "err", err)
+		return err
+	}
+	h.log.Info("registry: pulled manifest through from a peer", "repo", repo, "ref", ref)
+	return nil
+}
+
+// repoFromPath recovers the repository name from a /v2/<name>/<kind>/... path.
+// The router already split it, but the blob handler only receives the digest,
+// and a peer fetch needs the repo for the peer's URL.
+func repoFromPath(path, kind string) string {
+	rest, ok := strings.CutPrefix(path, "/v2/")
+	if !ok {
+		return ""
+	}
+	i := strings.Index(rest, kind)
+	if i < 0 {
+		return ""
+	}
+	return rest[:i]
 }

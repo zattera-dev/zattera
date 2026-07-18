@@ -38,6 +38,13 @@ func New(dir string, clk clock.Clock, auth Authenticator, log *slog.Logger) (*Re
 	}, nil
 }
 
+// EnablePullThrough makes this registry fetch blobs and manifests it lacks
+// from peer control nodes (T-101). Safe to leave unset: without it a miss is
+// simply a miss, which is the single-node and dev behaviour.
+func (rg *Registry) EnablePullThrough(peers PeerSource, creds PeerCredentials, client *http.Client) {
+	rg.handler.fetcher = NewFetcher(peers, creds, client)
+}
+
 // Handler returns the OCI distribution HTTP handler.
 func (rg *Registry) Handler() http.Handler { return rg.handler }
 

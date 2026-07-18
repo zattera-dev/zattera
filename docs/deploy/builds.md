@@ -60,16 +60,17 @@ If no builder is schedulable — you cordoned the only one — the build **stays
 
 Every **control** node serves an OCI registry on `:5000` (TLS with the cluster CA; `:5001` plain HTTP in dev mode) — worker nodes host no blobs, and the join flow points them at a control node's registry address. Blobs are content-addressed, so shared layers are stored once. Agents pull over the mesh with per-node credentials minted at join time.
 
-::: callout warning Blobs are node-local, not replicated
-Each control node's registry is **independent storage on its own disk** — image blobs and the tag/refcount graph live in `<data-dir>/registry/`, deliberately outside raft (raft replicates platform *state*, and multi-gigabyte layers have no business in a consensus log). Nothing copies a blob from one control node to another.
+Blobs are **node-local**: they live on the disk of the control node whose registry received them, deliberately outside raft — a consensus log replicates every entry to every member, and multi-gigabyte layers have no business there ([ADR-0005](../contributing/architecture-decision-records/0005-registry-blob-locality)).
 
-For a single-control cluster this is simply how it works. On a **multi-control** cluster it has consequences worth knowing before you rely on HA:
+That alone would strand images, because the node that receives a push isn't always the node a worker was told to pull from (builds push to the raft leader; a joining node is handed whichever control node served its join). So **any control node can serve any blob**: on a miss it fetches the object from a peer control node, commits it locally, and serves it. Manifests bring their children and layers along, so the local refcount graph stays complete.
 
-- Storage does **not** multiply — a 5 GB image consumes 5 GB once, not once per control node.
-- An image is only on the node whose registry received the push, so **losing that node makes those images unpullable** until they're rebuilt. A raft quorum keeps the control plane alive; it does not keep your images available.
-- Backups cover state, the CA, and volume snapshots — **not** registry blobs. Disaster recovery restores the platform, then images must be rebuilt or re-pushed.
+- **Storage stays ~1×.** A blob lands only on the nodes that actually serve it — a 5 GB image does not become 5 GB per control node.
+- **Cold pulls cost one extra hop**; every later pull on that node is local.
+- **Nothing to configure.** A single-node cluster resolves zero peers and behaves exactly as before.
+- **Intra-cluster only.** This never proxies Docker Hub or any external registry.
 
-If you run multiple control nodes today, treat "can I rebuild every running image from source?" as the real recovery question, and keep external base images pullable.
+::: callout warning Availability, not durability
+Pull-through means a blob can be *served* from anywhere; it does not make copies for safety. A blob still lives only on the nodes that happened to fetch it, and **backups cover state, the CA and volume snapshots — not registry blobs**. If you run multiple control nodes, treat "can I rebuild every running image from source?" as the real recovery question. Durable image storage on an object store is planned as an opt-in backend.
 :::
 
 ::: callout note Registry CA trust on multi-node clusters

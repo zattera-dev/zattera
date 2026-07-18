@@ -3794,6 +3794,39 @@ successfully through a follower's registry.
 `docs/deploy/builds.md` with the real behaviour: still one copy, any control
 node can serve it, and the durability caveat that remains until T-102.
 
+**DONE** — `internal/daemon/registry/pullthrough.go`: a `Fetcher` with a
+state-derived `PeerSource` (control nodes, ALIVE, excluding self — resolved per
+call so it follows joins/removals), wired into the blob and manifest miss paths
+in `httpapi.go` and enabled from `daemon.go` with the node's existing
+`node-<id>` registry credential over the cluster CA.
+Blobs commit before serving (`BlobStore.Write` digest-verifies and renames
+atomically), so a failed transfer never half-serves; a peer whose bytes do not
+match the requested digest is dropped, not committed. Manifests fetch their
+children and blobs first, then go through `PutManifest`, so the refcount graph
+stays complete; a tag is bound locally only when the request was by tag.
+Concurrent requests for one digest collapse via single-flight, plus a
+concurrency cap, per-peer HEAD probe, and per-attempt/total deadlines.
+**Beyond the plan:** the write path needed no tee — committing then serving
+locally was both simpler and safer than streaming while writing, so the gotcha
+about serving mid-write resolved by construction.
+**GC gotcha checked, not just assumed:** a pulled-through blob carries no
+refcount until a manifest references it. Today's GC only sweeps from manifest
+teardown, so it is not treated as garbage — verified by test. ADR-0005 records
+that any future mark-and-sweep over the blob directory must account for it.
+**Not done:** the 3-control cloud verification in the acceptance criteria.
+Local dev is single-node, so the multi-node path is covered by the two-registry
+harness (real HTTP handlers, real auth) rather than real infra; run the cloud
+rig before trusting it in production.
+**Tests:** `internal/daemon/registry/pullthrough_test.go` — fetch+commit+serve,
+second pull never touches the peer, zero peers is a clean 404 (single-node
+no-op), unreachable peer falls through to the next, digest mismatch commits
+nothing under either digest, manifest pull-through brings config+layers and
+registers the graph, 8 concurrent pulls collapse to one fetch, an
+authenticated peer rejects anonymous and accepts the node credential, and an
+unrelated sweep does not delete a pulled-through blob.
+Also verified on a dev cluster that the single-node path is untouched: build,
+push and pull succeed with zero peers resolved and no pull-through log lines.
+
 ### T-102 — Optional S3-backed registry blob store
 
 Phase 9 · Depends: T-101, T-64 · Size: M

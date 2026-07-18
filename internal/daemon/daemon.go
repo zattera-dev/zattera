@@ -45,6 +45,7 @@ import (
 	"github.com/zattera-dev/zattera/internal/daemon/notify"
 	"github.com/zattera-dev/zattera/internal/daemon/proxy"
 	"github.com/zattera-dev/zattera/internal/daemon/raftstore"
+	"github.com/zattera-dev/zattera/internal/daemon/registry"
 	crt "github.com/zattera-dev/zattera/internal/daemon/runtime"
 	"github.com/zattera-dev/zattera/internal/daemon/scheduler"
 	"github.com/zattera-dev/zattera/internal/daemon/secrets"
@@ -479,10 +480,12 @@ func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store
 	// Embedded registry (T-32): control nodes host image blobs on :5000, TLS
 	// with the CA server cert, authenticated by node creds and user PATs.
 	var retentionSweeper scheduler.RegistrySweeper
+	var localRegistry *registry.Registry
 	if reg, err := startRegistry(ctx, cfg, st, authority, clk, log); err != nil {
 		log.Warn("registry start failed; continuing without it", "err", err)
 		deploySrv.Platforms = platformResolver(nil, "", log)
 	} else if reg != nil {
+		localRegistry = reg
 		retentionSweeper = reg.Manifests // prune images for GC'd releases (T-38)
 		deploySrv.Platforms = platformResolver(reg, registryClientAddr(cfg), log)
 	}
@@ -644,6 +647,19 @@ func runControlPlane(ctx context.Context, cfg config.Config, rs *raftstore.Store
 			} else {
 				selfRegAuth = &crt.RegistryAuth{Username: "node-" + nodeID, Password: pw, ServerAddress: registryClientAddr(cfg)}
 			}
+		}
+
+		// Pull-through (T-101): blobs are node-local, and the control node that
+		// received a push is not necessarily the one a worker was told to pull
+		// from. Let this registry fetch what it lacks from its peers, using the
+		// node's own registry credential over the mesh with the cluster CA.
+		// Single-node clusters resolve zero peers, so this stays inert there.
+		if localRegistry != nil && selfRegAuth != nil {
+			localRegistry.EnablePullThrough(
+				controlRegistryPeers(st, nodeID, cfg),
+				registry.PeerCredentials{Username: selfRegAuth.Username, Password: selfRegAuth.Password},
+				peerRegistryClient(authority),
+			)
 		}
 
 		metricsStore := openMetricsStore(cfg, clk, log)

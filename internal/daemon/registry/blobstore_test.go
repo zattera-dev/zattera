@@ -2,8 +2,6 @@ package registry
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,11 +9,6 @@ import (
 
 	"github.com/zattera-dev/zattera/internal/pkgutil/clock"
 )
-
-func digestOf(b []byte) string {
-	sum := sha256.Sum256(b)
-	return "sha256:" + hex.EncodeToString(sum[:])
-}
 
 func TestParseDigest(t *testing.T) {
 	good := digestOf([]byte("hi"))

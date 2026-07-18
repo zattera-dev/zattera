@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	zatterav1 "github.com/zattera-dev/zattera/api/gen/zattera/v1"
 	"github.com/zattera-dev/zattera/internal/config"
 	"github.com/zattera-dev/zattera/internal/daemon/api"
 	"github.com/zattera-dev/zattera/internal/daemon/ca"
@@ -117,3 +118,58 @@ func registryAuthenticator(st *state.Store, clk clock.Clock) registry.Authentica
 		return false
 	})
 }
+
+// controlRegistryPeers resolves the OTHER control nodes' registry endpoints
+// from cluster state on every call, so pull-through follows joins, removals and
+// status changes without a restart (T-101). A DOWN node is skipped: fetching
+// from it would only burn the per-peer timeout.
+func controlRegistryPeers(st *state.Store, selfID string, cfg config.Config) registry.PeerSource {
+	_, port, _ := net.SplitHostPort(cfg.Registry.Listen)
+	if port == "" {
+		port = "5000"
+	}
+	scheme := "https"
+	if cfg.Registry.InsecureHTTP {
+		scheme = "http"
+	}
+	return registry.PeerSourceFunc(func() []registry.Peer {
+		var peers []registry.Peer
+		for _, n := range st.ListNodes() {
+			if n.GetMeta().GetId() == selfID || n.GetMeshIp() == "" {
+				continue
+			}
+			if n.GetStatus() != zatterav1.NodeStatus_NODE_STATUS_ALIVE {
+				continue
+			}
+			isControl := false
+			for _, r := range n.GetRoles() {
+				if r == zatterav1.NodeRole_NODE_ROLE_CONTROL {
+					isControl = true
+				}
+			}
+			if !isControl {
+				continue // only control nodes host blobs
+			}
+			peers = append(peers, registry.Peer{
+				NodeID:  n.GetMeta().GetId(),
+				BaseURL: scheme + "://" + net.JoinHostPort(n.GetMeshIp(), port),
+			})
+		}
+		return peers
+	})
+}
+
+// peerRegistryClient dials peer registries trusting the cluster CA — the same
+// authority that signs each control node's registry server cert.
+func peerRegistryClient(authority *ca.CA) *http.Client {
+	return &http.Client{
+		Timeout: peerRegistryTimeout,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{RootCAs: authority.Pool(), MinVersion: tls.VersionTLS12},
+		},
+	}
+}
+
+// peerRegistryTimeout bounds one peer exchange from the client side; the
+// fetcher applies its own per-attempt and total deadlines on top.
+const peerRegistryTimeout = 5 * time.Minute
