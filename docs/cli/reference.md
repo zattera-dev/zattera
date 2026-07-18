@@ -141,8 +141,10 @@ See [Nodes](../setup/nodes).
 
 | Command | Description |
 | ------- | ----------- |
-| `zt nodes ls` | Nodes: name, roles, status, mesh IP, labels |
+| `zt nodes ls` | Nodes: name, roles, status, version, mesh IP, labels |
 | `zt nodes join-token create [--worker] [--control] [--single-use=true]` | Mint a join token (worker by default) |
+| `zt nodes cordon <name>` | Stop scheduling new work on a node; running containers stay up |
+| `zt nodes uncordon <name>` | Return a cordoned or drained node to service |
 | `zt nodes drain <name>` | Migrate instances away, wait until DRAINED |
 | `zt nodes rm <name> [--force]` | Remove a drained node |
 

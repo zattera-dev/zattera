@@ -3390,6 +3390,45 @@ never lost, regardless of how briefly it runs.**
 
 ---
 
+### T-96 — `zt nodes label`: set node labels from the CLI
+
+Phase 9 · Depends: T-12 · Size: XS
+**Problem:** placement constraints (`[env.<name>.placement]` in `zattera.toml`,
+`appconfig.go`) match node labels, and `SetNodeLabels` is implemented and
+admin-gated (`internal/daemon/api/nodes.go`, `PUT /v1/nodes/{id}/labels`) — but
+nothing in `internal/cli/nodes.go` calls it. Nodes only ever have the two labels
+they self-assign at boot (`zattera.dev/os-arch`, `builder=true`), so the
+documented "pin this environment to `region=eu`" workflow is unreachable
+without hand-rolling an API call. Either the feature is complete or it isn't;
+right now the server half ships without a client.
+**Files:** `internal/cli/nodes.go`, `internal/cli/nodes_test.go`,
+`docs/setup/nodes.md`, `docs/cli/reference.md`
+**Steps:**
+
+1. `zt nodes label <name> key=value [key=value…]` — resolve the name via
+   `resolveNodeID`, merge onto the node's existing labels (read-modify-write via
+   `GetNode`), call `SetNodeLabels`. `key-` removes a key, mirroring kubectl.
+2. `--overwrite` to replace the whole set rather than merge; without it,
+   refuse to change an existing key so a typo can't silently repoint placement.
+3. Reject the reserved `zattera.dev/` prefix — those are node-asserted facts,
+   and letting an operator overwrite `os-arch` would misplace multi-arch images.
+   `builder` stays writable (opting a worker out of builds is legitimate).
+4. Print the resulting label set; honor `--json` like the other node commands.
+
+**Gotchas:** `SetNodeLabelsRequest` also carries `schedulable`, which
+cordon/uncordon own — send the node's current value or you will silently
+uncordon a cordoned node. Labels are the scheduler's input, so a placement
+constraint that matches nothing must fail the deploy loudly rather than park
+replicas forever (check what the scheduler does today before shipping).
+**Tests:** unit — merge vs `--overwrite`, `key-` removal, reserved-prefix
+refusal, existing-key refusal without `--overwrite`, and that `schedulable` is
+preserved for a cordoned node.
+**Acceptance:** `go test ./internal/cli/ -run TestNodesLabel`
+**Docs:** remove the "custom labels are API-only" callout from
+`docs/setup/nodes.md` and document the command there and in the CLI reference.
+
+---
+
 # Backlog (M4/M5 — do not implement now)
 
 - **M4:** SSO/OIDC login; wildcard certs via DNS-01 (libdns providers);
@@ -3634,5 +3673,5 @@ P6: T-55(17,08)→T-56 · T-57(20)→T-58 · T-59(13)→T-60(41)/T-61(23) ·
 P7: T-69(61,42)→T-70→T-71 · T-72(45)→T-73 · T-74(59,07) · T-75(37,45) ·
     T-76 · T-77(65) · T-78 · T-79(54) · T-80(all)
 P8: T-81(12)→T-82→T-83 · T-84(83,17,29)→T-85(84) · T-86(84,85)
-P9: T-91(53,40) · T-92(66,76) · T-93(14) · T-94(19) · T-95(93,94,54)
+P9: T-91(53,40) · T-92(66,76) · T-93(14) · T-94(19) · T-95(93,94,54) · T-96(12)
 ```
